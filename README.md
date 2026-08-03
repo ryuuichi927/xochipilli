@@ -1,80 +1,95 @@
-# ショチピリ（Xochipilli）D1
+# Xochipilli
 
-ローカル PC で動く **玄人向け** 音楽→映像作業台。  
-名前はアステカ神話の **Xochipilli（花の王子）** — 花と歌、音楽と芸術の神。編集画面は静かに、中身は曲の世界を区間ごとに映像へ開く。
+**English** | [日本語](README.ja.md) | [中文](README.zh.md)
 
-## 起動
+Local, **pro-oriented** music → film workbench for your Mac.  
+The name comes from the Aztec deity **Xochipilli** (“Flower Prince”) — god of flowers, song, music, and art. The editor stays quiet; the track’s world opens into picture, segment by segment.
 
-### デスクトップ窓（推奨・A+B）
+Designed by **Ryuichi Hamakawa**.
+
+## Launch
+
+### Desktop window (recommended)
 ```bash
-cd "/path/to/xochipilli"
+cd /path/to/music-film-workbench
 ./RUN_DESKTOP.sh
-# または Dock / Applications の Xochipilli.app
+# or Dock / Applications → Xochipilli.app
 ```
-詳細: [`docs/DESKTOP.md`](docs/DESKTOP.md)
+Details: [docs/DESKTOP.md](docs/DESKTOP.md) · [JA](docs/DESKTOP.ja.md) · [ZH](docs/DESKTOP.zh.md)
 
-### ブラウザだけ
+### Browser only
 ```bash
 ./RUN_ME.sh
 ```
-http://127.0.0.1:8787
+Open http://127.0.0.1:8787
 
-## 使い方（要点）
-1. **曲を導入（消化）** — 分析用信号へ（再導入すると区間と clips はリセット）
-2. 再生・シーク。区間枠クリックで編集へ。**ピンは P**（再生ヘッド）
-3. 区間に **映像プロンプト**。AI 感情キーワードは参考
-4. 体感と違う → **Unmatch**
-5. **映像を生成** — `.env` の `VIDEO_PROVIDER`（未設定時は mock）
+## Quick workflow
+1. **Import a track (digest)** — builds analysis audio (re-import resets segments and clips)
+2. Play / seek. Click a segment frame to edit. **Pin with P** (playhead)
+3. Write a **video prompt** per segment. AI emotion keywords are hints only
+4. Feels wrong → **Unmatch**
+5. **Generate video** — set `VIDEO_PROVIDER` in `.env` (default: `mock`)
 
-## キーボード
-**正本:** [`docs/KEYS.md`](docs/KEYS.md)（チャットの提案は消えるのでここに書く）
+## Keyboard
+**Canonical list:** [docs/KEYS.md](docs/KEYS.md) · [JA](docs/KEYS.ja.md) · [ZH](docs/KEYS.zh.md)
 
-Space 再生 · R 曲頭 · **P** ピン · **K** 枠の頭 · **L** ループ · **F** フィット · **Tab** · ほかは docs/KEYS.md（入力中は無効）
+Space play · R to start · **P** pin · **K** frame start · **L** loop · **F** fit · **Tab** · more in KEYS (disabled while typing)
 
-## 言語
-右上 ⚙ — 日 / 英 / 中（`mfw.lang`）
+## UI language
+Top-right ⚙ — Japanese / English / Chinese (`mfw.lang`)
 
-## 映像 API（自分のキー / SuperGrok OAuth）
+## Video API (your keys / SuperGrok OAuth)
 
-**手順の正本:** [`docs/VIDEO_API.md`](docs/VIDEO_API.md)
+**Canonical guide:** [docs/VIDEO_API.md](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md) · [ZH](docs/VIDEO_API.zh.md)
 
 ```bash
 cp .env.example .env
-# VIDEO_PROVIDER=xai   # 推奨（Ben's Tool SuperGrok OAuth）
-# VIDEO_PROVIDER=fal   # 任意
-# VIDEO_PROVIDER=mock  # API 不要
+# VIDEO_PROVIDER=xai   # recommended (Ben's Tool SuperGrok OAuth)
+# VIDEO_PROVIDER=fal   # optional
+# VIDEO_PROVIDER=mock  # no API
 ./RUN_ME.sh
 ```
 
-工場既定（`.env` 無し）は `mock`。`xai` / `fal` 失敗時は生成が mock に落ちることがある。
+Factory default without `.env` is `mock`. Failed `xai` / `fal` calls may fall back to mock.
 
-## データ配置
+## Data layout
 
-| パス | 役割 |
+| Path | Role |
 |------|------|
-| `data/projects/<id>/project.json` | 作品メタ・区間・採用クリップ参照（**series は含めない**） |
-| `data/projects/<id>/digest.json` | 消化の詳細（series・peaks 等）。サーバが区間特徴量に使う |
-| `data/projects/<id>/source.*` | 導入した音源（**現行1本**。再導入で差し替え） |
-| `data/projects/<id>/analysis.wav` | 消化用モノラル信号 |
-| `data/projects/<id>/clips/` | テイク mp4・区間 audio 断片・連鎖フレーム・program.mp4 |
-| `data/projects/<id>/refs/` | 区間の参考静止画（i2v） |
-| `theory/` | digest / mapping 理論 JSON |
-| `static/` | UI（app.js / i18n / style / brand / fonts） |
-| `app/` | FastAPI 本体 |
-| `docs/` | KEYS / VIDEO_API / BRAND / DESKTOP / DEV_LOG など |
-| `tmp/` | 開発用のかす（成果物を置かない） |
+| `data/projects/<id>/project.json` | Work metadata, segments, adopted clip refs (**no full series**) |
+| `data/projects/<id>/digest.json` | Digest detail (series, peaks, …); used for segment features |
+| `data/projects/<id>/source.*` | Imported audio (**one current** file; re-import replaces) |
+| `data/projects/<id>/analysis.wav` | Mono signal for digest |
+| `data/projects/<id>/clips/` | Take mp4s, segment audio slices, chain frames, `program.mp4` |
+| `data/projects/<id>/refs/` | Per-segment stills (i2v) |
+| `theory/` | Digest / mapping theory JSON |
+| `static/` | UI (`app.js`, i18n, style, brand, fonts) |
+| `app/` | FastAPI backend |
+| `docs/` | KEYS, VIDEO_API, BRAND, DESKTOP, DEV_LOG, … |
+| `tmp/` | Dev scratch (not deliverables) |
 
-削除（設定のプロジェクト削除 / 区間削除 / テイク削除）は **JSON とディスクを揃える**。  
-JSON に無い clips は孤児（古いテイク）なので、必要なら GC 対象。
+Deletes (project / segment / take) keep **JSON and disk in sync**.  
+Clips missing from JSON are orphans (old takes) and may be GC’d.
 
-## 命名
-`~/アイデアブック/ideas/20260803-music-film-workbench/source/naming-xochipilli.md`
+## Documentation (EN · JA · ZH)
 
-## ブランド
-ロゴ役割: [`docs/BRAND.md`](docs/BRAND.md)（本アイコン=03 / カジュアル=01 / 生成待ち花=02）
+| Topic | English | 日本語 | 中文 |
+|-------|---------|--------|------|
+| This README | [README.md](README.md) | [README.ja.md](README.ja.md) | [README.zh.md](README.zh.md) |
+| Desktop launch | [DESKTOP](docs/DESKTOP.md) | [DESKTOP.ja](docs/DESKTOP.ja.md) | [DESKTOP.zh](docs/DESKTOP.zh.md) |
+| Keyboard | [KEYS](docs/KEYS.md) | [KEYS.ja](docs/KEYS.ja.md) | [KEYS.zh](docs/KEYS.zh.md) |
+| Video API | [VIDEO_API](docs/VIDEO_API.md) | [VIDEO_API.ja](docs/VIDEO_API.ja.md) | [VIDEO_API.zh](docs/VIDEO_API.zh.md) |
+| Brand | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
+| Header font | [FONT_CANDIDATES](docs/FONT_CANDIDATES.md) | [FONT_CANDIDATES.ja](docs/FONT_CANDIDATES.ja.md) | [FONT_CANDIDATES.zh](docs/FONT_CANDIDATES.zh.md) |
+| Dev log | [DEV_LOG](docs/DEV_LOG.md) (JA body) | same | [summary ZH](docs/DEV_LOG.zh.md) · [summary EN](docs/DEV_LOG.en.md) |
+| Docs index | [docs/README.md](docs/README.md) | | |
 
-## ヘッダー字体
-**採用中: Cinzel**（`.brand-title` のみ）。履歴と差し替え手順: [`docs/FONT_CANDIDATES.md`](docs/FONT_CANDIDATES.md)
+## Brand & type
+- Logo roles: [docs/BRAND.md](docs/BRAND.md) (primary=03 / casual=01 / wait flower=02)
+- Header typeface: **Cinzel** (`.brand-title` only) — [docs/FONT_CANDIDATES.md](docs/FONT_CANDIDATES.md)
 
-## 制作ログ
-[`docs/DEV_LOG.md`](docs/DEV_LOG.md)
+## Privacy note
+This repo is intended **private** by default. Do not commit `.env`, `data/projects/`, or personal media (see `.gitignore`).
+
+## License
+All rights reserved by the author unless a `LICENSE` file is added later.

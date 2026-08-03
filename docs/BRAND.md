@@ -1,26 +1,28 @@
-# ショチピリ / Xochipilli — ブランドマーク正本
+# Xochipilli — brand marks (canonical)
 
-採用日: 2026-08-03（3案すべて採用・役割固定）
+**English** | [日本語](BRAND.ja.md) | [中文](BRAND.zh.md)
 
-| 役割 | ファイル | 元案 |
-|------|----------|------|
-| **本アイコン**（公式・favicon・OS） | `static/brand/icon-primary.png` | 03 独特ハイブリッド |
-| **カジュアル**（ヘッダー等） | `static/brand/icon-casual.png` | 01 エレガント横顔 |
-| **ローディング花**（生成待ち） | `static/brand/loader-flower.png` | 02 レトロ線画の花 |
+Adopted: 2026-08-03 (all three concepts kept; roles fixed)
 
-## ローディング演出（案2）
-映像生成など待ちのとき、**画面中央に花だけ**が浮く（カード・文言なし）。
-- 待機中: 花びら展開 **1→2→3 をループ**
-- 成功終了時のみ: **発光 → 散る**
-- 失敗時: 散らずにフェードアウト
+| Role | File | Source concept |
+|------|------|----------------|
+| **Primary icon** (official · favicon · OS) | `static/brand/icon-primary.png` | 03 unique hybrid |
+| **Casual** (header, etc.) | `static/brand/icon-casual.png` | 01 elegant profile |
+| **Loader flower** (waiting on generate) | `static/brand/loader-flower.png` | 02 retro line flower |
 
-実装: `#genLoader` / `#flowerLoad`（`static/index.html` + `app.js` `showGenLoader`）
+## Loader motion (concept 02)
+While waiting (e.g. video gen), **only the flower** floats center screen (no card / copy).
+- Waiting: petal open **1→2→3 loop**
+- Success only: **glow → scatter**
+- Failure: fade out without scatter
 
-## 色
-UI 金アクセント `#C9A227` に寄せる。黒地前提。
+Implementation: `#genLoader` / `#flowerLoad` (`static/index.html` + `app.js` `showGenLoader`)
 
-## UI 背景
-うっすらアステカ花格子: `static/brand/bg-aztec-flower.svg`（`body::before` opacity ~0.045）。操作面はパネルで可読性維持。
+## Color
+UI gold accent toward `#C9A227`. Black ground assumed.
 
-## ヘッダー字体
-**Cinzel**（案1・採用）。詳細は `docs/FONT_CANDIDATES.md`。
+## UI background
+Faint Aztec flower lattice: `static/brand/bg-aztec-flower.svg` (`body::before` opacity ~0.045). Panels keep readability.
+
+## Header typeface
+**Cinzel** (candidate #1, adopted). See `FONT_CANDIDATES.md`.

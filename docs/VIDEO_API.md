@@ -1,78 +1,80 @@
-# ショチピリ — 映像 API の繋ぎ方
+# Xochipilli — wiring the video API
 
-## プロバイダ一覧（D1）
+**English** | [日本語](VIDEO_API.ja.md) | [中文](VIDEO_API.zh.md)
 
-| `VIDEO_PROVIDER` | 認証 | メモ |
-|------------------|------|------|
-| **`mock`**（既定） | 不要 | ローカル仮映像 |
+## Providers
+
+| `VIDEO_PROVIDER` | Auth | Notes |
+|------------------|------|-------|
+| **`mock`** (default) | none | Local placeholder video |
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
-| **`xai`**（別名 `grok`） | **SuperGrok OAuth（Ben's Tool）** または `XAI_API_KEY` | Grok Imagine Video |
+| **`xai`** (alias `grok`) | **SuperGrok OAuth (Ben's Tool)** or `XAI_API_KEY` | Grok Imagine Video |
 
-失敗時は **mock に落ちる**（区間 note に理由）。
+On failure the pipeline **falls back to mock** (reason in the segment note).
 
 ---
 
-## 推奨: SuperGrok Heavy → OAuth（Grok 映像）
+## Recommended: SuperGrok → OAuth (Grok video)
 
-龍一の環境は Ben's Tool が `provider: xai-oauth` / `video_gen.provider: xai` 済み。  
-ショチピリは **同じ OAuth トークン**を使う（別途 API キーを買わなくてよい）。
+If Ben's Tool is already on `provider: xai-oauth` / `video_gen.provider: xai`,  
+Xochipilli reuses **the same OAuth token** (no separate paid API key required).
 
-### 手順
+### Steps
 
-1. Ben's Tool 側で xAI にログインできていること  
-   - Desktop の xAI / SuperGrok ログイン  
-   - または CLI: `bentool auth`（xai-oauth）  
-   - `~/.bentool/auth.json` に `providers.xai-oauth.tokens` がある
+1. Be logged into xAI on the Ben's Tool side  
+   - Desktop xAI / SuperGrok login  
+   - or CLI: `bentool auth` (xai-oauth)  
+   - `~/.bentool/auth.json` should contain `providers.xai-oauth.tokens`
 
-2. プロジェクト `.env`:
+2. Project `.env`:
 
 ```bash
-cd "/path/to/xochipilli"
+cd /path/to/music-film-workbench
 cp .env.example .env
 ```
 
 ```bash
 VIDEO_PROVIDER=xai
-# 任意
+# optional
 XAI_VIDEO_MODEL=grok-imagine-video
 XAI_VIDEO_RESOLUTION=720p
 XAI_VIDEO_ASPECT=16:9
 ```
 
-3. サーバ再起動:
+3. Restart the server:
 
 ```bash
 ./RUN_ME.sh
 ```
 
-4. 確認（トークン本文は出ない）:
+4. Check (token body is never printed):
 
 ```bash
 curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 ```
 
-期待:
+Expect:
 - `video_provider`: `"xai"`
 - `xai_auth.ok`: `true`
-- `xai_auth.source`: `bentool-oauth` など
+- `xai_auth.source`: e.g. `bentool-oauth`
 
-5. UI で区間プロンプト → 生成。  
-   1本 **数十秒〜数分**かかることがある。
+5. In the UI: segment prompt → Generate.  
+   One clip may take **tens of seconds to a few minutes**.
 
-### OAuth が切れているとき
+### When OAuth expires
 
-health の `xai_auth.relogin_hint` や note に auth エラーが出る。  
-**Ben's Tool で xAI 再ログイン**してから `./RUN_ME.sh`。
+`xai_auth.relogin_hint` on health, or an auth error in the segment note.  
+**Re-login to xAI in Ben's Tool**, then `./RUN_ME.sh`.
 
-### 認証の優先順（コード）
+### Auth priority (code)
 
-1. Ben's Tool `resolve_xai_http_credentials`（リフレッシュ込み）  
+1. Ben's Tool `resolve_xai_http_credentials` (with refresh)  
 2. `XAI_API_KEY`  
-3. `auth.json` の生 `access_token`（最終手段・期限切れやすい）
+3. Raw `access_token` in `auth.json` (last resort; expires easily)
 
 ---
 
-## FAL を使う場合
+## Using FAL
 
 ```bash
 VIDEO_PROVIDER=fal
@@ -80,11 +82,9 @@ FAL_KEY=...
 FAL_VIDEO_MODEL=fal-ai/minimax-video
 ```
 
-詳細は従来どおり。
-
 ---
 
-## mock に戻す
+## Back to mock
 
 ```bash
 VIDEO_PROVIDER=mock
@@ -92,16 +92,16 @@ VIDEO_PROVIDER=mock
 
 ---
 
-## まだ無いもの
+## Not built yet
 
-- UI からのキー入力（ブラウザに秘密を置かない）  
-- xAI edit / extend を区間ツールから直接叩く（生成のみ）  
-- 区間音声を xAI に載せる条件生成（text→video が主）
+- Entering keys from the UI (secrets stay out of the browser)  
+- xAI edit / extend as direct segment tools (generate only today)  
+- Conditioning xAI on segment audio (text→video is primary)
 
 ---
 
-## コード
+## Code map
 
-- `app/xai_auth.py` — OAuth / API key 解決  
-- `app/video_gen.py` — `generate_xai_clip`（`/v1/videos/generations`）  
-- `docs/VIDEO_API.md` — 本ファイル  
+- `app/xai_auth.py` — OAuth / API key resolution  
+- `app/video_gen.py` — `generate_xai_clip` (`/v1/videos/generations`)  
+- `docs/VIDEO_API*.md` — this guide family

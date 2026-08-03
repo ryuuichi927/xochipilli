@@ -1,66 +1,68 @@
-# ショチピリ — キーボードショートカット正本
+# Xochipilli — keyboard shortcuts (canonical)
 
-**このファイルが正本。** チャットの提案は消える。  
-**実装は、龍一が採用したキーだけ。** おすすめを勝手に実装しない。
+**English** | [日本語](KEYS.ja.md) | [中文](KEYS.zh.md)
 
-**前提:** 文字入力フォーカス中は無効。
+**This file is canonical.** Chat suggestions disappear.  
+**Only keys the designer explicitly adopts get implemented.** Do not ship “nice to have” shortcuts on your own.
 
----
-
-## 実装済み（採用分のみ）
-
-| キー | 動作 | 備考 |
-|------|------|------|
-| **Space** | 再生 / 停止 | |
-| **R** | 曲の先頭へ | |
-| **P** | 再生ヘッド位置にピン | 1回目開き・2回目閉じ |
-| **K** | **いまの枠の始まり**から再生 | 選択区間 t0 → 開きピン → ヘッド下の枠 → 最後の枠 |
-| **L** | 選択区間をループ再生 ON/OFF | 採用 |
-| **F** | 選択区間が画面に収まるようズーム | 採用 |
-| **Tab / Shift+Tab** | 次 / 前の区間を選択 | 採用 |
-| **← / →** | 0.1 秒シーク | **Shift** で 1 秒 |
-| **+ / −** | ズームイン / アウト | |
-| **0** | ズーム全体表示 | |
-| **Enter** | 選択区間のプロンプトへフォーカス | |
-| **Del / Backspace** | 選択区間を削除 | |
-| **⌘Z / Ctrl+Z** | 戻る（Undo） | 最後の編集を取り消し |
-| **⌘Y / Ctrl+Y**（または **⌘⇧Z**） | 進む（Redo） | 取り消した変更を戻す |
-| ホイール | 波形ズーム | |
-| **Shift+ホイール** | パン | |
-| 波形ダブルクリック | **再生ヘッドをその位置へ** | **区間枠の内側でも可**。Alt+ダブルクリックで全体表示 |
-| 波形クリック（空） | シークのみ | ピンは P |
-| 区間枠クリック | その区間の編集へ | |
-
-設定パネルの **Esc で閉じる** は UI 用（ショートカット表の編集コマンドではない）。
+**Rule:** shortcuts are disabled while a text field is focused.
 
 ---
 
-## 未採用・実装しない（メモだけ・コードに載せない）
+## Implemented (adopted only)
 
-龍一が明示採用するまで実装しない。
+| Key | Action | Notes |
+|-----|--------|-------|
+| **Space** | Play / pause | |
+| **R** | Jump to track start | |
+| **P** | Pin at playhead | 1st open · 2nd close |
+| **K** | Play from **start of current frame** | selected segment t0 → open pin → frame under head → last frame |
+| **L** | Loop selected segment ON/OFF | adopted |
+| **F** | Zoom so selection fits the view | adopted |
+| **Tab / Shift+Tab** | Next / previous segment | adopted |
+| **← / →** | Seek 0.1 s | **Shift** = 1 s |
+| **+ / −** | Zoom in / out | |
+| **0** | Zoom to full track | |
+| **Enter** | Focus prompt of selected segment | |
+| **Del / Backspace** | Delete selected segment | |
+| **⌘Z / Ctrl+Z** | Undo | last edit |
+| **⌘Y / Ctrl+Y** (or **⌘⇧Z**) | Redo | restore undone change |
+| Wheel | Waveform zoom | |
+| **Shift+wheel** | Pan | |
+| Double-click waveform | **Move playhead there** | **works inside segment frames too**. Alt+double-click = fit all |
+| Click empty waveform | Seek only | pin is **P** |
+| Click segment frame | Enter that segment’s edit | |
 
-| キー案 | 動作案 |
-|--------|--------|
-| G | 選択区間を生成 |
+**Esc** closes the settings panel (UI chrome, not an editing command in this table).
+
+---
+
+## Not adopted — do not implement (memo only)
+
+Do not code these until the designer explicitly adopts them.
+
+| Idea | Proposed action |
+|------|-----------------|
+| G | Generate selected segment |
 | U | Unmatch |
-| \\ | 枠の頭↔尾 |
-| Esc | 区間選択解除（設定閉じ以外） |
-| I/O など | 明示ピン分け等 |
+| \\ | Jump frame head ↔ tail |
+| Esc | Clear segment selection (besides closing settings) |
+| I/O etc. | Split pin roles, etc. |
 
 ---
 
-## 変更ルール（今後・厳守）
+## Change rules (strict)
 
-1. ショートカットの **おすすめは KEYS.md の「未採用」に書くだけ**。実装しない。  
-2. **「採用」と言われたキーだけ** `app.js` に入れる。  
-3. チャットだけで案を出して終わりにしない。必ずこのファイルへ。  
-4. i18n / 設定パネルの一覧は実装済みだけ。
+1. Shortcut **suggestions** go only under “Not adopted” in this file. No code.  
+2. Put a key in `app.js` **only after explicit adopt**.  
+3. Never leave a proposal only in chat — write it here.  
+4. i18n / settings shortcut lists show **implemented** keys only.
 
 ---
 
-## 履歴
+## History
 
-- 2026-08-03: 初版。L/F/Tab 採用。ピン P・枠頭 K。  
-- 2026-08-03: 勝手実装の G/U/\\/Esc を削除。おすすめ≠実装を明文化。
-- 2026-08-03: ⌘Z/⌘Y Undo·Redo。波形ダブルクリック＝再生ヘッド。
-- 2026-08-03: 枠内ダブルクリックでヘッド。生成に参考画像添付。
+- 2026-08-03: First cut. L/F/Tab adopted. Pin P · frame-head K.  
+- 2026-08-03: Removed unilateral G/U/\\/Esc. Documented suggest ≠ ship.  
+- 2026-08-03: ⌘Z/⌘Y undo·redo. Waveform double-click = playhead.  
+- 2026-08-03: Double-click inside frame moves head. Ref image on generate.
