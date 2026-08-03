@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ショチピリ</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/static/style.css?v=slim1" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img class="brand-mark" src="/static/brand/icon-casual-64.png" width="32" height="32" alt="" />
+      <!-- Proper Nahuatl spelling — same in ja/en/zh; font locked separately -->
+      <strong class="brand-title" id="brandTitle" translate="no">Xochipilli</strong>
+      <span class="badge" id="videoModelBadge" title="">…</span>
+    </div>
+    <div class="top-actions">
+      <button id="btnOpenFolder" type="button" class="ghost" data-i18n="btnOpenFolder">現プロジェクトのフォルダへ</button>
+      <label class="file-btn">
+        <span data-i18n="btnImport">曲を導入</span>
+        <input id="fileInput" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.aiff,.aif" hidden />
+      </label>
+      <select id="projectSelect" aria-label="project"></select>
+      <button id="btnSettings" type="button" class="ghost icon-btn" data-i18n-title="settings" title="設定">⚙</button>
+    </div>
+  </header>
+
+  <main class="layout layout-music-first">
+    <!-- Music bar: full width, primary work surface -->
+    <section class="timeline-stage panel">
+      <div class="panel-h row">
+        <span data-i18n="editBar">タイムライン</span>
+        <div class="bar-modes">
+          <label><input type="radio" name="barMode" value="waveform" checked /> <span data-i18n="modeWave">波形</span></label>
+          <label><input type="radio" name="barMode" value="lyrics" /> <span data-i18n="modeLyrics">歌詞</span></label>
+          <label><input type="radio" name="barMode" value="both" /> <span data-i18n="modeBoth">両方</span></label>
+        </div>
+      </div>
+      <div id="transport" class="transport">
+        <button id="btnPlay" type="button" data-i18n="btnPlay">再生 / 停止</button>
+        <span id="timeLabel" class="mono">0:00 / 0:00</span>
+        <span id="pinState" class="pin-state"></span>
+        <button id="btnCancelPin" type="button" class="ghost" data-i18n="btnCancelPin">ピン取消</button>
+        <span id="zoomLabel" class="zoom-label mono"></span>
+        <label class="rate-label"><span data-i18n="playRate">速度</span>
+          <select id="playRate" aria-label="playback rate">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="0.75">0.75×</option>
+            <option value="1" selected>1.0×</option>
+            <option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option>
+            <option value="1.75">1.75×</option>
+            <option value="2">2.0×</option>
+          </select>
+        </label>
+        <span id="status" class="status status-inline" data-i18n="statusIdle">曲を導入すると、分析用信号へ消化します。</span>
+      </div>
+      <div id="waveWrap" class="wave-wrap" data-i18n-title="waveTitle" title="">
+        <canvas id="wave" height="280"></canvas>
+        <div id="playhead" class="playhead"></div>
+        <div id="segmentsLayer" class="segments-layer"></div>
+        <div id="openPinMark" class="open-pin hidden"></div>
+      </div>
+      <div class="wave-scroll-row" id="waveScrollRow" hidden>
+        <input id="waveScroll" type="range" min="0" max="1000" value="0" step="1" aria-label="timeline scroll" />
+      </div>
+      <div id="lyricsBox" class="lyrics-box hidden">
+        <textarea id="lyrics" rows="2" data-i18n-placeholder="lyricsPh" placeholder=""></textarea>
+      </div>
+      <div class="timeline-meta">
+        <div id="globalFeat" class="feat chips"></div>
+        <p class="hint hint-compact" data-i18n="hintKeys">Space · R · P ピン · K 枠頭 · L · F · Tab · ホイールズーム</p>
+      </div>
+    </section>
+
+    <section class="work-bottom">
+      <div class="preview-col">
+        <div class="panel panel-fill">
+          <div class="panel-h" data-i18n="preview">プレビュー</div>
+          <div class="video-shell">
+            <div class="video-stack" id="videoStack">
+              <video id="videoA" class="video-layer is-front" playsinline muted></video>
+              <video id="videoB" class="video-layer" playsinline muted></video>
+            </div>
+            <div class="preview-toolbar">
+              <label class="sync-label">
+                <input id="syncMusic" type="checkbox" checked />
+                <span data-i18n="syncMusic">音楽と同期（採用クリップ通し）</span>
+              </label>
+              <button id="btnPlayProgram" type="button" class="ghost primary" data-i18n="btnPlayProgram">通し再生</button>
+              <button id="btnPlayWithMusic" type="button" class="ghost" data-i18n="btnPlayWithMusic">この区間だけ</button>
+              <button id="btnExportProgram" type="button" class="ghost" data-i18n="btnExportProgram">結合書き出し</button>
+            </div>
+            <audio id="audio" controls></audio>
+          </div>
+        </div>
+        <div class="panel panel-soft panel-world">
+          <div class="panel-h" data-i18n="worldTitle">世界観（任意）</div>
+          <textarea id="world" rows="2" data-i18n-placeholder="worldPh" placeholder="色・時代・禁止モチーフ。全区間の生成に添えます。"></textarea>
+          <button id="btnSaveMeta" type="button" class="ghost" data-i18n="btnSave">保存</button>
+        </div>
+      </div>
+
+      <div class="segments-col panel panel-fill">
+        <div class="panel-h" data-i18n="segments">区間</div>
+        <div id="segments" class="segments"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="settingsBackdrop" class="settings-backdrop hidden" hidden></div>
+  <aside id="settingsPanel" class="settings-panel hidden" hidden aria-hidden="true">
+    <div class="settings-head">
+      <h2 data-i18n="settingsTitle">設定</h2>
+      <button id="btnSettingsClose" type="button" class="ghost" data-i18n="btnClose">閉じる</button>
+    </div>
+    <div class="settings-body">
+      <label class="settings-label" for="langSelect" data-i18n="langLabel">表示言語</label>
+      <div class="lang-seg" role="group" aria-label="language">
+        <button type="button" class="lang-btn" data-lang="ja" data-i18n="langJa">日本語</button>
+        <button type="button" class="lang-btn" data-lang="en" data-i18n="langEn">English</button>
+        <button type="button" class="lang-btn" data-lang="zh" data-i18n="langZh">中文</button>
+      </div>
+      <p class="hint" data-i18n="settingsHint">編集画面は言語を変えても同じ操作です。</p>
+      <hr class="settings-hr" />
+      <div class="settings-label" data-i18n="settingsProjectsTitle">プロジェクト</div>
+      <p class="hint" data-i18n="settingsProjectsHint">改名は表示名のみ（フォルダIDはそのまま）。削除は data/projects 内の実ファイルも消えます。</p>
+      <div id="settingsProjectList" class="settings-project-list"></div>
+      <hr class="settings-hr" />
+      <div class="settings-label" data-i18n="settingsKeysTitle">キーボード</div>
+      <p class="settings-keys" data-i18n="settingsKeysBody">Space 再生 · R 曲頭 · P ピン · K 枠の頭 · L ループ · F フィット · Tab 次区間 · ←/→ · +/- · 0 全体 · Enter · Del</p>
+      <p class="hint" data-i18n="settingsKeysNote">正本 docs/KEYS.md。おすすめはファイルの未採用欄だけ。採用の指示があるまで実装しない。</p>
+      <hr class="settings-hr" />
+      <p class="hint" data-i18n="hintPin">波形クリックはシーク、または区間枠をクリックで編集へ。ピンは P（再生ヘッド）。</p>
+      <hr class="settings-hr" />
+      <div class="settings-label" data-i18n="settingsDesigner">設計</div>
+      <p class="settings-designer-name" id="settingsDesignerName" data-i18n="settingsDesignerName">龍一 · Ryuichi Hamakawa</p>
+      <p class="hint" data-i18n="settingsDesignerNote">Xochipilli / ショチピリ — 音楽映画作業台</p>
+    </div>
+  </aside>
+
+  <!-- Generate wait: floating flower only — loop unfold until done, then glow+scatter -->
+  <div id="genLoader" class="gen-loader hidden" hidden aria-hidden="true" aria-live="polite">
+    <div class="flower-load" id="flowerLoad" role="status" aria-label="generating">
+      <div class="flower-stage stage-1">
+        <img src="/static/brand/loader-flower-256.png" alt="" draggable="false" />
+      </div>
+      <div class="flower-stage stage-2">
+        <img src="/static/brand/loader-flower-256.png" alt="" draggable="false" />
+      </div>
+      <div class="flower-stage stage-3">
+        <img src="/static/brand/loader-flower-256.png" alt="" draggable="false" />
+      </div>
+      <div class="flower-sparks" id="flowerSparks"></div>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js?v=slim1"></script>
+  <script src="/static/app.js?v=slim1"></script>
+</body>
+</html>

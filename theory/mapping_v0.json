@@ -1,0 +1,43 @@
+{
+  "mapping_id": "mapping_v0",
+  "version": 0,
+  "user_prompt_wins": true,
+  "soft_constraints": [
+    {
+      "when": "tempo_bpm >= 140",
+      "prompt_tags": ["fast cutting", "swift camera motion", "high energy pacing"]
+    },
+    {
+      "when": "tempo_bpm < 90",
+      "prompt_tags": ["slow camera", "long takes", "calm pacing"]
+    },
+    {
+      "when": "spectral_centroid_mean_hz >= 2500",
+      "prompt_tags": ["bright lighting", "high key", "clear highlights"]
+    },
+    {
+      "when": "spectral_centroid_mean_hz < 1200",
+      "prompt_tags": ["darker tones", "low key lighting", "muted palette"]
+    },
+    {
+      "when": "onset_density >= 3.0",
+      "prompt_tags": ["busy motion", "frequent micro-movements"]
+    },
+    {
+      "when": "onset_density < 1.0",
+      "prompt_tags": ["stillness", "sparse movement"]
+    },
+    {
+      "when": "low_high_ratio >= 1.4",
+      "prompt_tags": ["heavy low-end feel", "grounded framing", "weight at bottom of frame"]
+    },
+    {
+      "when": "rms_std >= 0.08",
+      "prompt_tags": ["contrast swings", "dynamic light changes"]
+    }
+  ],
+  "hard_defaults": {
+    "snap_cuts_to_beats": false,
+    "max_clip_seconds": 30
+  }
+}

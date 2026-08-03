@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+  <!-- Subtle Aztec / flower-prince lattice — gold lines only, for CSS tiling -->
+  <defs>
+    <style>
+      .g { fill: none; stroke: #c9a227; stroke-width: 1.1; stroke-linecap: square; stroke-linejoin: miter; }
+      .d { fill: #c9a227; }
+    </style>
+  </defs>
+  <!-- step-fret corners -->
+  <path class="g" d="M12 48h24v-24h24 M12 192h24v24h24 M228 48h-24v-24h-24 M228 192h-24v24h-24"/>
+  <path class="g" d="M36 72h12v12H36z M192 72h12v12h-12z M36 156h12v12H36z M192 156h12v12h-12z"/>
+  <!-- diamond ring -->
+  <path class="g" d="M120 28 L188 120 L120 212 L52 120 Z"/>
+  <path class="g" d="M120 52 L164 120 L120 188 L76 120 Z"/>
+  <!-- 8-petal flower (Xochipilli cue) -->
+  <g transform="translate(120 120)">
+    <circle class="g" r="10"/>
+    <circle class="g" r="22"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(45)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(90)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(135)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(180)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(225)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(270)"/>
+    <path class="g" d="M0 -38 C8 -28 8 -18 0 -10 C-8 -18 -8 -28 0 -38Z" transform="rotate(315)"/>
+    <!-- tiny solar dots -->
+    <circle class="d" r="1.4" cx="0" cy="-48"/>
+    <circle class="d" r="1.4" cx="34" cy="-34"/>
+    <circle class="d" r="1.4" cx="48" cy="0"/>
+    <circle class="d" r="1.4" cx="34" cy="34"/>
+    <circle class="d" r="1.4" cx="0" cy="48"/>
+    <circle class="d" r="1.4" cx="-34" cy="34"/>
+    <circle class="d" r="1.4" cx="-48" cy="0"/>
+    <circle class="d" r="1.4" cx="-34" cy="-34"/>
+  </g>
+  <!-- faint staff lines (music) -->
+  <path class="g" opacity="0.55" d="M20 120h40 M180 120h40 M120 20v40 M120 180v40"/>
+</svg>
