@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import uuid
@@ -12,7 +13,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .video_gen import extract_audio_segment, extract_last_frame, generate_clip
+from .video_gen import (
+    clip_unit_seconds,
+    concat_video_files,
+    extract_audio_segment,
+    extract_last_frame,
+    generate_clip,
+)
 from .digest import digest_audio, segment_features
 from .emotion import emotion_keywords
 from .mapping import build_constraints, compose_video_prompt
@@ -102,6 +109,7 @@ def health():
         or os.environ.get("XAI_VIDEO_MODEL_I2V")
         or "grok-imagine-video-1.5"
     )
+    unit = clip_unit_seconds()
     out: dict[str, Any] = {
         "ok": True,
         "stage": "D1",
@@ -115,6 +123,7 @@ def health():
         "xai_resolution": xai_res if provider == "xai" else None,
         "xai_aspect": xai_aspect if provider == "xai" else None,
         "xai_resolution_choices": ["480p", "720p", "1080p"],
+        "clip_unit_seconds": unit,
     }
     if provider == "xai":
         out["video_model"] = out["xai_model"]
@@ -557,7 +566,7 @@ async def _api_generate_inner(pid: str, sid: str):
 
     # 1) User-attached reference image wins
     # 2) Else previous segment last-frame continuity
-    start_image = None
+    start_image: Path | None = None
     chain = False
     user_ref = False
     ref_name = seg.get("ref_image")
@@ -597,16 +606,15 @@ async def _api_generate_inner(pid: str, sid: str):
                         chain = False
 
     cam_lock = bool(seg.get("camera_lock"))
-    composed = compose_video_prompt(
-        seg["prompt"],
-        feat,
-        world=p.get("world") or "",
-        chain_from_prev=chain and not user_ref,
-        user_ref_image=user_ref,
-        camera_lock=cam_lock,
-    )
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
+    tags = tags + list(seg.get("emotion_keywords") or [])
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
+    unit = clip_unit_seconds()
+    # Split into ~unit-second chunks (last may be shorter)
+    n_parts = max(1, int(math.ceil(dur / unit)))
+    # If only slightly over unit, still one part
+    if dur <= unit + 0.35:
+        n_parts = 1
 
     clip_id = "c_" + uuid.uuid4().hex[:8]
     out = clips_dir / f"{sid}-{clip_id[2:]}.mp4"
@@ -621,41 +629,129 @@ async def _api_generate_inner(pid: str, sid: str):
     except Exception:
         audio_seg = None
 
-    meta = await generate_clip(
-        out_path=out,
-        duration=dur,
-        user_prompt=seg["prompt"],
-        composed_prompt=composed,
-        tags=tags + list(seg.get("emotion_keywords") or []),
-        audio_segment=audio_seg if audio_seg and Path(audio_seg).exists() else None,
-        start_image=start_image,
-    )
+    part_paths: list[Path] = []
+    subclips: list[dict[str, Any]] = []
+    last_meta: dict[str, Any] = {}
+    cur_start = start_image
+    composed_first = ""
+
+    for i in range(n_parts):
+        part_dur = unit if i < n_parts - 1 else max(1.0, dur - unit * (n_parts - 1))
+        # Keep last part at least ~2s if possible by borrowing from previous split logic
+        if n_parts > 1 and i == n_parts - 1 and part_dur < 2.0 and dur >= 2.0:
+            part_dur = max(2.0, dur - unit * (n_parts - 1))
+
+        chain_here = bool(cur_start) and (chain or user_ref or i > 0)
+        # Force camera lock across internal chain for continuity
+        lock_here = bool(cam_lock or chain_here)
+
+        composed = compose_video_prompt(
+            seg["prompt"],
+            {**feat, "duration_sec": part_dur},
+            world=p.get("world") or "",
+            chain_from_prev=chain_here and not (user_ref and i == 0),
+            user_ref_image=bool(user_ref and i == 0),
+            camera_lock=lock_here,
+        )
+        if i == 0:
+            composed_first = composed
+
+        part_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}.mp4"
+        meta = await generate_clip(
+            out_path=part_path,
+            duration=part_dur,
+            user_prompt=seg["prompt"],
+            composed_prompt=composed,
+            tags=tags,
+            audio_segment=None,  # mux only on final if needed
+            start_image=cur_start,
+        )
+        last_meta = meta
+        part_paths.append(part_path)
+        subclips.append(
+            {
+                "index": i,
+                "file": part_path.name,
+                "duration": part_dur,
+                "provider": meta.get("provider"),
+                "model": meta.get("model"),
+                "chained": bool(meta.get("chained") or chain_here),
+                "chain_frame": Path(cur_start).name if cur_start else None,
+            }
+        )
+
+        # Next start = last frame of this part
+        if i < n_parts - 1 and part_path.is_file():
+            frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-last.jpg"
+            try:
+                extract_last_frame(part_path, frame_path)
+                cur_start = frame_path
+            except Exception:
+                cur_start = None
+
+    # Concat if multiple parts
+    if len(part_paths) == 1:
+        if part_paths[0].resolve() != out.resolve():
+            out.write_bytes(part_paths[0].read_bytes())
+    else:
+        concat_video_files(part_paths, out)
+
+    # Optional: mux segment audio onto final (best-effort)
+    if audio_seg and Path(audio_seg).exists() and out.is_file():
+        tmp_mux = out.with_suffix(".mux.mp4")
+        import subprocess
+
+        r = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(out),
+                "-i",
+                str(audio_seg),
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-shortest",
+                str(tmp_mux),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode == 0 and tmp_mux.is_file():
+            tmp_mux.replace(out)
+
     take_n = len(seg.get("clips") or []) + 1
     entry = {
         "id": clip_id,
         "file": out.name,
-        "provider": meta.get("provider"),
-        "composed_prompt": composed,
-        "note": meta.get("note"),
-        "fal_error": meta.get("fal_error"),
-        "xai_error": meta.get("xai_error"),
+        "provider": last_meta.get("provider"),
+        "composed_prompt": composed_first,
+        "note": last_meta.get("note"),
+        "fal_error": last_meta.get("fal_error"),
+        "xai_error": last_meta.get("xai_error"),
         "created_at": storage._now(),
         "label": f"take {take_n}",
-        "auth_source": meta.get("auth_source"),
-        "model": meta.get("model"),
-        "resolution": meta.get("resolution"),
-        "chained": bool(meta.get("chained") or chain or user_ref),
+        "auth_source": last_meta.get("auth_source"),
+        "model": last_meta.get("model"),
+        "resolution": last_meta.get("resolution"),
+        "chained": bool(last_meta.get("chained") or chain or user_ref or n_parts > 1),
         "chain_from_segment": (prev.get("id") if chain and prev and not user_ref else None),
         "chain_frame": start_image.name if start_image else None,
         "user_ref_image": bool(user_ref),
         "ref_image": seg.get("ref_image") if user_ref else None,
-        "camera_lock": bool(cam_lock or (chain and not user_ref)),
+        "camera_lock": bool(cam_lock or chain or n_parts > 1),
+        "clip_unit_seconds": unit,
+        "subclip_count": n_parts,
+        "subclips": subclips,
+        "duration_requested": dur,
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id
     seg["video"] = dict(entry)
     storage.save_project(p)
-    return {"segment": seg, "meta": meta, "clip": entry}
+    return {"segment": seg, "meta": last_meta, "clip": entry}
 
 
 class ClipSelectBody(BaseModel):
@@ -717,6 +813,17 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
                         fpath.unlink()
                 except OSError:
                     pass
+
+    # also clean subclip parts if present
+    for sc in hit.get("subclips") or []:
+        fname = sc.get("file")
+        if fname:
+            fpath = clips_dir / Path(str(fname)).name
+            try:
+                if fpath.is_file():
+                    fpath.unlink()
+            except OSError:
+                pass
 
     if seg.get("active_clip_id") == clip_id:
         if seg["clips"]:
