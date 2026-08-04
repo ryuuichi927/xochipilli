@@ -23,7 +23,7 @@
 | **← / →** | Seek 0.1 s | **Shift** = 1 s |
 | **+ / −** | Zoom in / out | |
 | **0** | Zoom to full track | |
-| **Enter** | Focus prompt of selected segment | |
+| **Enter** | Focus prompt of selected segment | **only** automatic way into the prompt (or click the textarea yourself). **Shortcuts off while typing** (Del does not delete the frame) |
 | **Del / Backspace** | Delete selected segment | |
 | **⌘Z / Ctrl+Z** | Undo | last edit |
 | **⌘Y / Ctrl+Y** (or **⌘⇧Z**) | Redo | restore undone change |
@@ -31,7 +31,7 @@
 | **Shift+wheel** | Pan | |
 | Double-click waveform | **Move playhead there** | **works inside segment frames too**. Alt+double-click = fit all |
 | Click empty waveform | Seek only | pin is **P** |
-| Click segment frame | Enter that segment’s edit | |
+| Click segment frame | Select that segment (highlight) | **does not** focus the prompt, **does not** move playhead. Pin close same. Music keys stay live |
 
 **Esc** closes the settings panel (UI chrome, not an editing command in this table).
 
@@ -66,3 +66,4 @@ Do not code these until the designer explicitly adopts them.
 - 2026-08-03: Removed unilateral G/U/\\/Esc. Documented suggest ≠ ship.  
 - 2026-08-03: ⌘Z/⌘Y undo·redo. Waveform double-click = playhead.  
 - 2026-08-03: Double-click inside frame moves head. Ref image on generate.
+- 2026-08-04: Frame click / pin close no longer auto-focus prompt (Space stays usable). Enter or click textarea to edit text. Frame click no longer seeks to t0.

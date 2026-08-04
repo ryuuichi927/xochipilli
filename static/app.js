@@ -868,12 +868,80 @@ function xRatioToTime(ratio) {
   return v.start + Math.min(1, Math.max(0, ratio)) * v.span;
 }
 
+/**
+ * True while the user is typing in a text field (prompt, lyrics, world, etc.).
+ * Checks both the event target and document.activeElement — WKWebView / focus
+ * races sometimes deliver keydown with target=body while the caret is still in
+ * a textarea. While typing, ALL editing shortcuts must stay off (esp. Del).
+ */
 function isTypingTarget(el) {
-  if (!el || el === document.body) return false;
-  const tag = (el.tagName || "").toLowerCase();
-  if (tag === "input" || tag === "textarea" || tag === "select") return true;
-  if (el.isContentEditable) return true;
-  return !!el.closest?.("textarea, input, select, [contenteditable='true']");
+  const nodes = [];
+  if (el) nodes.push(el);
+  try {
+    const ae = document.activeElement;
+    if (ae && ae !== el) nodes.push(ae);
+  } catch (_) {}
+
+  for (const node of nodes) {
+    if (!node || node === document.body || node === document.documentElement) continue;
+    const tag = (node.tagName || "").toLowerCase();
+    if (tag === "textarea" || tag === "select") return true;
+    if (tag === "input") {
+      const type = String(node.type || "text").toLowerCase();
+      // text-like inputs only; skip pure chrome controls
+      if (
+        [
+          "button",
+          "submit",
+          "checkbox",
+          "radio",
+          "file",
+          "reset",
+          "range",
+          "color",
+          "image",
+          "hidden",
+        ].includes(type)
+      ) {
+        // still block destructive shortcuts when a control has focus
+        if (type === "range" || type === "checkbox" || type === "radio" || type === "file") {
+          return true;
+        }
+        continue;
+      }
+      return true;
+    }
+    if (node.isContentEditable) return true;
+    try {
+      if (node.closest?.("textarea, select, [contenteditable=''], [contenteditable='true'], [contenteditable=true]")) {
+        return true;
+      }
+      const inp = node.closest?.("input");
+      if (inp) {
+        const type = String(inp.type || "text").toLowerCase();
+        if (
+          ![
+            "button",
+            "submit",
+            "reset",
+            "image",
+            "hidden",
+          ].includes(type)
+        ) {
+          return true;
+        }
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+/** Global shortcuts must not run while composing IME or editing text. */
+function shouldIgnoreGlobalKeys(ev) {
+  if (!ev) return true;
+  if (ev.isComposing || ev.keyCode === 229 || ev.key === "Process") return true;
+  if (isTypingTarget(ev.target) || isTypingTarget(document.activeElement)) return true;
+  return false;
 }
 
 function togglePlay() {
@@ -958,7 +1026,13 @@ function playFromFrameStart() {
   state.raf = requestAnimationFrame(tick);
 }
 
-function selectSegment(sid, { focusPrompt = true } = {}) {
+/**
+ * Select a segment for edit chrome (highlight card + band).
+ * Does NOT focus the prompt by default — auto-focus steals Space/seek keys
+ * while the user is still driving the music. Prompt focus is opt-in only
+ * (Enter shortcut, or focusPrompt: true from an explicit "go edit text" path).
+ */
+function selectSegment(sid, { focusPrompt = false } = {}) {
   state.selectedSegId = sid;
   renderWave();
   renderSegments();
@@ -967,7 +1041,6 @@ function selectSegment(sid, { focusPrompt = true } = {}) {
   if (focusPrompt) {
     const ta = el?.querySelector("textarea");
     if (ta) {
-      // focus without stealing if user is mid-shortcut chain — call after M closes etc.
       requestAnimationFrame(() => {
         ta.focus({ preventScroll: true });
         const len = ta.value.length;
@@ -1007,7 +1080,8 @@ async function placePinAtPlayhead() {
           b: fmt(data.segment.t1),
         })
       );
-      selectSegment(data.segment.id, { focusPrompt: true });
+      // Select the new frame only — do not steal focus into the prompt.
+      selectSegment(data.segment.id, { focusPrompt: false });
     } else {
       if (data.open_pin != null) state.lastPinTime = data.open_pin;
       updatePinUi();
@@ -1565,6 +1639,14 @@ function renderSegments() {
     ta.rows = 3;
     ta.placeholder = t("promptPh");
     ta.value = s.prompt || "";
+    // Stop timeline shortcuts (Del/Space/…) from seeing prompt keystrokes.
+    ta.addEventListener(
+      "keydown",
+      (ev) => {
+        ev.stopPropagation();
+      },
+      true
+    );
     ta.addEventListener("change", async () => {
       try {
         await api(`/api/projects/${state.project.id}/segments/${s.id}/prompt`, {
@@ -2989,23 +3071,26 @@ async function onWaveClick(ev) {
   // Click on a segment band → jump to that segment's editor (no pin).
   const hit = segmentAtTime(tclick);
   if (hit) {
-    $("audio").currentTime = hit.t0;
-    updatePlayhead();
-    selectSegment(hit.id, { focusPrompt: true });
+    // Frame click = select for edit chrome only. Do not jump playhead to t0
+    // and do not focus the prompt — keep music keys (Space etc.) alive.
+    selectSegment(hit.id, { focusPrompt: false });
     setStatus(t("statusSegSelected", { a: fmt(hit.t0), b: fmt(hit.t1) }));
     return;
   }
 
-  // Empty waveform: seek only (pins are M).
+  // Empty waveform: seek only (pins are P).
   $("audio").currentTime = tclick;
   updatePlayhead();
 }
 
 function onGlobalKeydown(ev) {
-  if (isTypingTarget(ev.target)) return;
+  // Prompt / lyrics / world / IME: never treat as timeline commands.
+  // (Del used to delete the whole segment frame while editing text.)
+  if (shouldIgnoreGlobalKeys(ev)) return;
 
   const mod = ev.metaKey || ev.ctrlKey;
   // Undo / Redo — ⌘Z / ⌘⇧Z / ⌘Y (Ctrl on non-Mac)
+  // Native text undo stays in the field because we returned above while typing.
   if (mod && !ev.altKey && (ev.key === "z" || ev.key === "Z")) {
     ev.preventDefault();
     if (ev.shiftKey) redoEdit().catch((e) => setStatus(e.message));
@@ -3061,6 +3146,7 @@ function onGlobalKeydown(ev) {
     return;
   }
   if (key === "Enter") {
+    // Explicit: only Enter (or clicking the textarea) enters prompt edit.
     if (state.selectedSegId) {
       ev.preventDefault();
       selectSegment(state.selectedSegId, { focusPrompt: true });
@@ -3068,6 +3154,8 @@ function onGlobalKeydown(ev) {
     return;
   }
   if (key === "Backspace" || key === "Delete") {
+    // Hard guard: never delete a segment while any text field is active.
+    if (shouldIgnoreGlobalKeys(ev)) return;
     if (state.selectedSegId) {
       ev.preventDefault();
       deleteSelectedSegment().catch((e) => setStatus(e.message));
@@ -3099,6 +3187,19 @@ function onGlobalKeydown(ev) {
 }
 
 function wire() {
+  // Text fields keep their own keys (Del/Space/…) — do not bubble to timeline.
+  for (const id of ["lyrics", "world", "projStyle", "projNegative"]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener(
+      "keydown",
+      (ev) => {
+        ev.stopPropagation();
+      },
+      true
+    );
+  }
+
   const rateEl = $("playRate");
   if (rateEl) {
     try {
