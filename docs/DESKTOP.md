@@ -11,19 +11,20 @@ Layout:
 - `/Applications/Xochipilli.app` (official icon = concept 03)
 - Source tree: your clone of `music-film-workbench/`
 
-## How launch works (fixed 2026-08-04 evening)
-macOS **rejects direct exec of scripts inside Documents from a .app**  
-(symptom: click does nothing / log shows `Operation not permitted`).
+## How launch works (fixed 2026-08-04 night)
+macOS **rejects direct exec of scripts inside Documents from a .app**.
 
-The working chain is:
+Chain:
 
 1. Dock → `/Applications/Xochipilli.app`
-2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh`  
-   (the `.app` process **stays alive** as the GUI process — do **not** `nohup … &` then `exit 0`)
-3. → project `.venv` Python runs `desktop_app.py` (pywebview window)
+2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh` (process stays alive)
+3. → `desktop_app.py` starts/reuses FastAPI on `:8787`
+4. → **Chrome / Edge / Brave / Arc `--app=http://127.0.0.1:8787/`** (real UI window)  
+   Fallback: Safari, then pywebview
 
-**Do not go back to osascript+nohup background.** That made Dock think the app quit; the orphan Python hung on exit and no usable window stayed frontmost.
+**Why not pywebview alone?** On this Mac WKWebView stayed **pure white** while the same URL returned full HTML to urllib. See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md).
 
+Profile dir: `~/Library/Application Support/Xochipilli/chrome-app-profile`
 ## Other ways to start
 
 | Method | Path |

@@ -11,17 +11,18 @@
 - `/Applications/Xochipilli.app`（公式アイコン＝案3）
 - 実体コード: `music-film-workbench/` のクローン先
 
-## 起動の仕組み（2026-08-04 夜・再修正）
-macOS は **.app から Documents 内スクリプトを直接 exec すると拒否**する  
-（症状: クリックしても無反応 / ログに `Operation not permitted`）。
+## 起動の仕組み（2026-08-04 夜）
+macOS は **.app から Documents 内を直接 exec すると拒否**する。
 
-正しい鎖:
+鎖:
 1. Dock → `/Applications/Xochipilli.app`
-2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh`  
-   （**.app プロセスが GUI 本体として生き続ける**。`nohup … &` してすぐ `exit 0` はしない）
-3. → `.venv` の Python で `desktop_app.py`（pywebview 窓）
+2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh`（プロセスは生き残る）
+3. → `desktop_app.py` が `:8787` を起動／再利用
+4. → **Chrome 系 `--app=http://127.0.0.1:8787/`** で本番 UI  
+   だめなら Safari → 最後に pywebview
 
-**osascript + nohup 背景起動に戻さないこと。** Dock は「アプリ終了」とみなし、Python だけ孤児になって窓が前面に残らない／終了待ちでぶら下がる。
+**pywebview 単体に戻さない理由:** この Mac では WKWebView が **真っ白**のまま（サーバは HTML を正しく返していた）。  
+詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
 
 ## 他の起動手段
 

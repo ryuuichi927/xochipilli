@@ -1,5 +1,10 @@
 """
-Xochipilli desktop shell (B): local uvicorn + native window (pywebview).
+Xochipilli desktop shell (B): local uvicorn + native-feeling window.
+
+Primary: Google Chrome / Edge / Brave / Chromium  --app=http://127.0.0.1:PORT/
+  (WKWebView/pywebview stayed pure white on this host while HTTP served full HTML.)
+
+Fallback: Safari via `open`, then pywebview last resort.
 
 Usage:
   .venv/bin/python desktop_app.py
@@ -40,10 +45,10 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8787"))
 URL = f"http://{HOST}:{PORT}"
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
 
 
 def _alert(message: str, *, critical: bool = False) -> None:
-    """Best-effort macOS user-visible notice (Dock launch has no terminal)."""
     try:
         style = "critical" if critical else "informational"
         msg = str(message)[:500]
@@ -104,8 +109,20 @@ def _health_ok() -> bool:
     return (not prod) or prod == "Xochipilli"
 
 
+def _preflight_http() -> tuple[bool, str]:
+    try:
+        with urllib.request.urlopen(f"{URL}/", timeout=2.0) as r:
+            body = r.read()
+            if r.status != 200:
+                return False, f"GET / status={r.status}"
+            if b"<html" not in body.lower() and b"<!DOCTYPE" not in body[:200]:
+                return False, f"GET / not html ({len(body)} bytes)"
+            return True, f"GET / ok ({len(body)} bytes)"
+    except Exception as e:
+        return False, f"GET / failed: {e}"
+
+
 def _start_server() -> subprocess.Popen | None:
-    """Start uvicorn if nothing healthy is already on PORT."""
     if _health_ok():
         h = _health_payload() or {}
         print(f"[xochipilli] reuse server at {URL} (product={h.get('product')})")
@@ -118,8 +135,7 @@ def _start_server() -> subprocess.Popen | None:
             time.sleep(0.25)
         msg = (
             f"ポート {PORT} は使われているが、Xochipilli の /api/health が応答しない。"
-            " 別アプリが 8787 を占有しているか、前回のサーバが壊れている。"
-            " ターミナルで確認: lsof -iTCP:8787 -sTCP:LISTEN"
+            " 別アプリが占有しているか、前回のサーバが壊れている。"
         )
         print(f"[xochipilli] WARN: {msg}", file=sys.stderr)
         _alert(msg, critical=True)
@@ -163,10 +179,7 @@ def _start_server() -> subprocess.Popen | None:
                 err = ""
             err_l = err.lower()
             if "address already in use" in err_l or "errno 48" in err_l:
-                msg = (
-                    f"起動失敗: ポート {PORT} が使用中。"
-                    " 既存の Xochipilli / 他サーバを終了するか、.env の PORT= を変えてください。"
-                )
+                msg = f"起動失敗: ポート {PORT} が使用中。"
             else:
                 msg = "ローカルサーバの起動に失敗した。Logs/Xochipilli/session.log を確認。"
             print(f"[xochipilli] server exited early: {err[:400]}", file=sys.stderr)
@@ -174,10 +187,7 @@ def _start_server() -> subprocess.Popen | None:
             return proc
         time.sleep(0.15)
     print("[xochipilli] server did not become healthy in time", file=sys.stderr)
-    _alert(
-        f"サーバが {URL} で準備完了しなかった。ログを確認するか、一度 8787 を空けて再起動。",
-        critical=True,
-    )
+    _alert(f"サーバが {URL} で準備完了しなかった。", critical=True)
     return proc
 
 
@@ -200,211 +210,130 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
             proc.kill()
 
 
-def _activate_cocoa() -> None:
-    """Bring this process to the foreground on macOS (Dock launches)."""
+# Chromium-based browsers: reliable --app= window for local FastAPI UI
+_CHROME_CANDIDATES = (
+    Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+    Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+    Path("/Applications/Arc.app/Contents/MacOS/Arc"),
+)
+
+
+def _find_chromium() -> Path | None:
+    for p in _CHROME_CANDIDATES:
+        if p.is_file():
+            return p
+    return None
+
+
+def _open_chromium_app(url: str) -> tuple[subprocess.Popen | None, str]:
+    """Open a frameless-ish app window. Returns (proc, engine_name)."""
+    chrome = _find_chromium()
+    if chrome is None:
+        return None, ""
+    profile = SUPPORT / "chrome-app-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    target = url if url.endswith("/") else url + "/"
+    cmd = [
+        str(chrome),
+        f"--app={target}",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--new-window",
+    ]
+    print(f"[xochipilli] chromium app mode: {chrome.name} → {target}")
     try:
-        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return proc, chrome.name
+    except OSError as e:
+        print(f"[xochipilli] chromium launch failed: {e}")
+        return None, ""
 
-        app = NSApplication.sharedApplication()
-        app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
-        app.activateIgnoringOtherApps_(True)
-        print("[xochipilli] cocoa activateIgnoringOtherApps")
-    except Exception as e:
-        print(f"[xochipilli] cocoa activate skipped: {e}")
 
-
-def _preflight_http() -> tuple[bool, str]:
-    """Confirm the workbench HTML is actually served before opening WebView."""
+def _open_safari(url: str) -> bool:
+    target = url if url.endswith("/") else url + "/"
     try:
-        with urllib.request.urlopen(f"{URL}/", timeout=2.0) as r:
-            body = r.read()
-            if r.status != 200:
-                return False, f"GET / status={r.status}"
-            if b"<html" not in body.lower() and b"<!DOCTYPE" not in body[:200]:
-                return False, f"GET / not html ({len(body)} bytes)"
-            return True, f"GET / ok ({len(body)} bytes)"
-    except Exception as e:
-        return False, f"GET / failed: {e}"
+        subprocess.run(
+            ["/usr/bin/open", "-a", "Safari", target],
+            check=False,
+            capture_output=True,
+        )
+        print(f"[xochipilli] opened Safari {target}")
+        return True
+    except OSError as e:
+        print(f"[xochipilli] Safari open failed: {e}")
+        return False
 
 
-# Dark bootstrap so WKWebView never sits on a blank white document.
-# JS then navigates to the local FastAPI UI after /api/health succeeds.
-_BOOTSTRAP_HTML = """<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Xochipilli</title>
-  <style>
-    html, body {
-      margin: 0; height: 100%;
-      background: #0c0e12; color: #c9a227;
-      font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .box { text-align: center; max-width: 28rem; padding: 1.5rem; }
-    .sub { margin-top: .55rem; font-size: 13px; opacity: .72; color: #d8c98a; }
-    .err { margin-top: 1rem; color: #e8a0a0; font-size: 13px; white-space: pre-wrap; }
-    code { font-size: 12px; opacity: .85; }
-  </style>
-</head>
-<body>
-  <div class="box">
-    <div><strong>Xochipilli</strong></div>
-    <div class="sub" id="status">Connecting to local server…</div>
-    <div class="err" id="err"></div>
-  </div>
-  <script>
-    const targets = ["http://127.0.0.1:8787/", "http://localhost:8787/"];
-    const st = document.getElementById("status");
-    const er = document.getElementById("err");
-    async function probe(base) {
-      const r = await fetch(base + "api/health", { cache: "no-store" });
-      if (!r.ok) throw new Error("health " + r.status);
-      const j = await r.json();
-      if (j && j.ok === false) throw new Error("health not ok");
-      return base;
-    }
-    (async () => {
-      let last = "";
-      for (const t of targets) {
-        try {
-          st.textContent = "Found server at " + t;
-          const base = await probe(t);
-          st.textContent = "Opening workbench…";
-          location.replace(base);
-          return;
-        } catch (e) {
-          last = String(e && e.message ? e.message : e);
-        }
-      }
-      st.textContent = "Local server not reachable";
-      er.textContent =
-        "Start failed or port busy.\\n" +
-        "Tried 127.0.0.1:8787 and localhost:8787\\n" +
-        "Last error: " + last + "\\n\\n" +
-        "Logs: ~/Library/Logs/Xochipilli/session.log";
-    })();
-  </script>
-</body>
-</html>
-"""
-
-
-def main() -> int:
-    os.chdir(ROOT)
-    _load_dotenv()
-    print(f"[xochipilli] desktop_app start pid={os.getpid()} py={sys.executable}")
-    print(f"[xochipilli] sys.path[0:4]={sys.path[:4]}")
-
+def _run_pywebview(url: str) -> int:
+    """Last resort. On this Mac WKWebView often painted pure white; kept for machines without Chrome."""
     try:
         import webview
     except ImportError:
-        msg = (
-            "pywebview が入っていない。\n"
-            f"{VENV_PY} -m pip install pywebview\n"
-            "または requirements.txt を入れてから再度開いてください。"
-        )
-        print(msg, file=sys.stderr)
-        _alert(msg, critical=True)
+        _alert("Chrome も pywebview も使えません。", critical=True)
         return 1
 
-    server = _start_server()
-    atexit.register(_stop_server, server)
+    target = url if url.endswith("/") else url + "/"
+    # Minimal inline page first so we never ship a white void if URL fails
+    splash = f"""<!DOCTYPE html><html><head><meta charset=utf-8>
+<style>html,body{{margin:0;height:100%;background:#0c0e12;color:#c9a227;
+font:15px system-ui;display:flex;align-items:center;justify-content:center}}
+a{{color:#e8d48b}}</style></head><body>
+<div style="text-align:center">
+<strong>Xochipilli</strong>
+<p style="opacity:.8;font-size:13px">Opening workbench…</p>
+<p><a href="{target}">Open manually</a></p>
+</div>
+<script>setTimeout(function(){{location.replace({target!r})}}, 50)</script>
+</body></html>"""
 
-    ok_http, http_msg = _preflight_http()
-    print(f"[xochipilli] preflight: {http_msg}")
-    if not ok_http and not _health_ok():
-        print("[xochipilli] no healthy UI yet; bootstrap page will show error", file=sys.stderr)
-
-    storage = Path.home() / "Library/Application Support/Xochipilli/webview"
-    try:
-        storage.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        storage = Path.home() / "Library/Caches/Xochipilli-webview"
-        storage.mkdir(parents=True, exist_ok=True)
-
-    # Bootstrap first (never pure white). Navigate to FastAPI after health OK.
-    window_kwargs = {
+    kwargs = {
         "title": "Xochipilli",
-        "html": _BOOTSTRAP_HTML,
+        "url": target,
         "width": 1440,
         "height": 900,
         "min_size": (960, 640),
         "background_color": "#0c0e12",
         "text_select": True,
-        "focus": True,
     }
-
     try:
-        window = webview.create_window(**window_kwargs)
+        window = webview.create_window(**kwargs)
     except TypeError:
-        window_kwargs.pop("text_select", None)
-        window_kwargs.pop("focus", None)
-        window = webview.create_window(**window_kwargs)
-
-    print(f"[xochipilli] window created (bootstrap) → target {URL}/")
-
-    def _fetch_index_html() -> str | None:
+        kwargs.pop("text_select", None)
         try:
-            with urllib.request.urlopen(f"{URL}/", timeout=3.0) as r:
-                if r.status != 200:
-                    return None
-                return r.read().decode("utf-8", "replace")
-        except Exception as e:
-            print(f"[xochipilli] fetch index failed: {e}")
-            return None
+            window = webview.create_window(**kwargs)
+        except Exception:
+            window = webview.create_window(title="Xochipilli", html=splash, width=1440, height=900)
 
-    def _on_shown() -> None:
-        print("[xochipilli] event shown")
-        _activate_cocoa()
-        # Prefer load_html + base_uri: WKWebView on this host often stayed pure white
-        # with load_url("http://127.0.0.1:…") alone (see DESKTOP_INCIDENTS_2026-08-04).
+    print(f"[xochipilli] pywebview fallback url={target}")
+
+    def _shown() -> None:
         try:
-            html = _fetch_index_html()
-            if html and ("<html" in html.lower() or "<!doctype" in html.lower()):
-                base = f"{URL}/"
-                # Absolute static/API roots so CSS/JS load even if base_uri is ignored
-                html_abs = (
-                    html.replace('href="/static/', f'href="{base}static/')
-                    .replace("href='/static/", f"href='{base}static/")
-                    .replace('src="/static/', f'src="{base}static/')
-                    .replace("src='/static/", f"src='{base}static/")
-                    .replace('href="/favicon', f'href="{base}favicon')
-                    .replace('src="/api/', f'src="{base}api/')
-                )
-                try:
-                    window.load_html(html_abs, base_uri=base)
-                    print(f"[xochipilli] load_html ok base_uri={base} bytes={len(html_abs)}")
-                except TypeError:
-                    # older pywebview: no base_uri kw
-                    window.load_html(html_abs)
-                    print(f"[xochipilli] load_html ok (no base_uri) bytes={len(html_abs)}")
-                return
+            window.load_url(target)
+            print("[xochipilli] pywebview load_url", target)
         except Exception as e:
-            print(f"[xochipilli] load_html path failed: {e}")
-        try:
-            window.load_url(f"{URL}/")
-            print(f"[xochipilli] fallback load_url {URL}/")
-        except Exception as e:
-            print(f"[xochipilli] load_url failed: {e}")
-    def _on_loaded() -> None:
-        print("[xochipilli] event loaded")
+            print("[xochipilli] pywebview load_url failed", e)
+            try:
+                window.load_html(splash)
+            except Exception:
+                pass
 
     try:
-        window.events.shown += _on_shown
-        window.events.loaded += _on_loaded
-    except Exception as e:
-        print(f"[xochipilli] events hook skipped: {e}")
-        _activate_cocoa()
-        _on_shown()
-    # private_mode=False keeps localStorage (lang, play rate)
+        window.events.shown += _shown
+    except Exception:
+        pass
+
+    storage = SUPPORT / "webview"
+    storage.mkdir(parents=True, exist_ok=True)
     try:
-        webview.start(
-            private_mode=False,
-            storage_path=str(storage),
-            debug=False,
-        )
+        webview.start(private_mode=False, storage_path=str(storage))
     except TypeError:
         try:
             webview.start(private_mode=False)
@@ -412,13 +341,74 @@ def main() -> int:
             webview.start()
     except Exception:
         traceback.print_exc()
-        _alert("ウィンドウの表示に失敗した。session.log を確認してください。", critical=True)
-        _stop_server(server)
         return 1
-
-    print("[xochipilli] webview.start returned (window closed)")
-    _stop_server(server)
     return 0
+
+
+def main() -> int:
+    os.chdir(ROOT)
+    _load_dotenv()
+    SUPPORT.mkdir(parents=True, exist_ok=True)
+
+    print(f"[xochipilli] desktop_app start pid={os.getpid()} py={sys.executable}")
+    print(f"[xochipilli] sys.path[0:4]={sys.path[:4]}")
+
+    server = _start_server()
+    atexit.register(_stop_server, server)
+
+    ok_http, http_msg = _preflight_http()
+    print(f"[xochipilli] preflight: {http_msg}")
+    if not ok_http:
+        _alert(
+            "ローカル UI に届かない。\n"
+            f"{http_msg}\n"
+            "session.log を確認するか、ターミナルで ./RUN_ME.sh を試してください。",
+            critical=True,
+        )
+        # still try to open — user may fix port
+
+    target = f"{URL}/"
+
+    # --- Primary: Chromium --app= (avoids white WKWebView) ---
+    chrome_proc, engine = _open_chromium_app(target)
+    if chrome_proc is not None:
+        print(f"[xochipilli] shell_mode=chromium-app engine={engine} pid={chrome_proc.pid}")
+        # Keep this process alive while the app window runs so Dock treats us as open.
+        # Poll: if chrome exits quickly (<2s), fall through to other shells.
+        for i in range(20):
+            time.sleep(0.1)
+            if chrome_proc.poll() is not None:
+                print(f"[xochipilli] chromium exited early code={chrome_proc.returncode}")
+                break
+        else:
+            # Still running after 2s — wait until user closes the app window
+            print("[xochipilli] waiting for chromium app window to close…")
+            try:
+                chrome_proc.wait()
+            except KeyboardInterrupt:
+                chrome_proc.terminate()
+            print(f"[xochipilli] chromium closed code={chrome_proc.returncode}")
+            _stop_server(server)
+            return 0
+
+    # --- Secondary: Safari ---
+    if _open_safari(target):
+        print("[xochipilli] shell_mode=safari")
+        _alert(
+            "Chrome 系が使えなかったため Safari で開きました。\n"
+            f"{target}",
+            critical=False,
+        )
+        # Don't block forever on Safari; user has a browser tab.
+        time.sleep(1.5)
+        _stop_server(server)
+        return 0
+
+    # --- Last resort: pywebview ---
+    print("[xochipilli] shell_mode=pywebview-fallback")
+    rc = _run_pywebview(target)
+    _stop_server(server)
+    return rc
 
 
 if __name__ == "__main__":
