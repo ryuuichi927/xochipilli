@@ -75,6 +75,17 @@ def _proj(pid: str, *, with_series: bool = False) -> dict[str, Any]:
         raise HTTPException(404, "project not found")
 
 
+def _normalize_resolution(raw: str | None) -> str:
+    r = (raw or "720p").strip().lower()
+    if r in {"480", "480p"}:
+        return "480p"
+    if r in {"720", "720p"}:
+        return "720p"
+    if r in {"1080", "1080p", "fhd", "fullhd"}:
+        return "1080p"
+    return "720p"
+
+
 @app.get("/api/health")
 def health():
     provider = (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip()
@@ -83,6 +94,14 @@ def health():
     fal_set = bool(os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY"))
     # split name so editors/redactors never mangle the JSON key
     fal_flag_key = "fal_" + "key_configured"
+    xai_res = _normalize_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
+    xai_aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
+    xai_model = os.environ.get("XAI_VIDEO_MODEL", "grok-imagine-video")
+    xai_model_i2v = (
+        os.environ.get("XAI_VIDEO_I2V_MODEL")
+        or os.environ.get("XAI_VIDEO_MODEL_I2V")
+        or "grok-imagine-video-1.5"
+    )
     out: dict[str, Any] = {
         "ok": True,
         "stage": "D1",
@@ -91,17 +110,15 @@ def health():
         "video_provider": provider,
         fal_flag_key: fal_set if provider == "fal" else None,
         "fal_model": os.environ.get("FAL_VIDEO_MODEL") if provider == "fal" else None,
-        "xai_model": (
-            os.environ.get("XAI_VIDEO_MODEL", "grok-imagine-video") if provider == "xai" else None
-        ),
-        "xai_model_i2v": (
-            os.environ.get("XAI_VIDEO_MODEL_I2V", "grok-imagine-video-1.5")
-            if provider == "xai"
-            else None
-        ),
+        "xai_model": xai_model if provider == "xai" else None,
+        "xai_model_i2v": xai_model_i2v if provider == "xai" else None,
+        "xai_resolution": xai_res if provider == "xai" else None,
+        "xai_aspect": xai_aspect if provider == "xai" else None,
+        "xai_resolution_choices": ["480p", "720p", "1080p"],
     }
     if provider == "xai":
         out["video_model"] = out["xai_model"]
+        out["video_resolution"] = xai_res
         try:
             from .xai_auth import credentials_status
 
@@ -174,7 +191,7 @@ def api_reveal_project(pid: str):
 
     safe = Path(str(pid)).name
     if safe != pid or ".." in pid or "/" in pid or "\\" in pid:
-        raise HTTPException(400, "invalid project id")
+        raise HTTPException(400, "invalid project path")
     d = storage.project_dir(safe)
     try:
         d.resolve().relative_to(storage.PROJECTS.resolve())
@@ -626,6 +643,7 @@ async def _api_generate_inner(pid: str, sid: str):
         "label": f"take {take_n}",
         "auth_source": meta.get("auth_source"),
         "model": meta.get("model"),
+        "resolution": meta.get("resolution"),
         "chained": bool(meta.get("chained") or chain or user_ref),
         "chain_from_segment": (prev.get("id") if chain and prev and not user_ref else None),
         "chain_frame": start_image.name if start_image else None,

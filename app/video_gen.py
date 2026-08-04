@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -164,19 +163,6 @@ def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not out_jpg.is_file() or out_jpg.stat().st_size < 100:
-        cmd2 = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(video_path),
-            "-vf",
-            "select=eq(n\\,0)",
-            "-frames:v",
-            "1",
-            "-q:v",
-            "2",
-            str(out_jpg),
-        ]
         # better: take last frame via reverse
         cmd2 = [
             "ffmpeg",
@@ -268,6 +254,18 @@ def _xai_video_url_from_body(body: dict) -> str | None:
     return None
 
 
+def _normalize_xai_resolution(raw: str | None) -> str:
+    """Allow 480p / 720p / 1080p. Unknown values fall back to 720p."""
+    r = (raw or "720p").strip().lower()
+    if r in {"480", "480p"}:
+        return "480p"
+    if r in {"720", "720p"}:
+        return "720p"
+    if r in {"1080", "1080p", "fhd", "fullhd"}:
+        return "1080p"
+    return "720p"
+
+
 async def generate_xai_clip(
     prompt: str,
     duration: float,
@@ -277,8 +275,11 @@ async def generate_xai_clip(
 ) -> dict[str, Any]:
     """Grok Imagine video via SuperGrok OAuth (Ben's Tool) or XAI_API_KEY.
 
-    Text-to-video: grok-imagine-video (default).
-    Image-to-video (continuity): start_image → grok-imagine-video-1.5 by default.
+    Text-to-video: XAI_VIDEO_MODEL (default grok-imagine-video).
+    Image-to-video (continuity): start_image → XAI_VIDEO_I2V_MODEL
+    (default grok-imagine-video-1.5).
+
+    Resolution: XAI_VIDEO_RESOLUTION = 480p | 720p | 1080p (default 720p).
     """
     import asyncio
     import base64
@@ -293,9 +294,7 @@ async def generate_xai_clip(
     api_key = creds["api_key"]
     base_url = str(creds["base_url"]).rstrip("/")
     aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
-    resolution = (os.environ.get("XAI_VIDEO_RESOLUTION") or "720p").strip().lower()
-    if resolution not in {"480p", "720p"}:
-        resolution = "720p"
+    resolution = _normalize_xai_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
     dur = int(max(1, min(round(float(duration or 8)), 15)))
 
     use_i2v = bool(start_image and Path(start_image).is_file())
