@@ -20,8 +20,10 @@ from .video_gen import (
     extract_audio_segment,
     extract_last_frame,
     generate_clip,
+    plan_generation_parts,
     probe_duration,
     xai_chain_mode,
+    xai_duration_limits,
     xai_max_single_seconds,
     xfade_seconds,
 )
@@ -160,6 +162,7 @@ def health():
     if provider == "xai":
         out["video_model"] = out["xai_model"]
         out["video_resolution"] = xai_res
+        out["xai_duration"] = xai_duration_limits()
         try:
             from .xai_auth import credentials_status
 
@@ -648,20 +651,14 @@ async def _api_generate_inner(pid: str, sid: str):
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
     provider = _provider_name()
     unit = clip_unit_seconds()
-    # xAI can do up to ~15s in one request. Splitting 6–10s into 5s parts was
-    # leaving orphan p00 files when part1 extension failed — UI showed no take.
-    if provider == "xai" and dur <= xai_max_single_seconds() + 0.05:
-        n_parts = 1
-        unit = max(unit, min(dur, xai_max_single_seconds()))
-    else:
-        n_parts = max(1, int(math.ceil(dur / unit)))
-        if dur <= unit + 0.35:
-            n_parts = 1
-
-    # Internal multi-part may still use Extension; prev-segment chain already
-    # cleared by apply_segment_mode when mode=shift.
+    # Duration plan must match provider wire limits (esp. xAI int seconds / extension 2–10).
+    plan = plan_generation_parts(provider, dur)
+    n_parts = max(1, len(plan))
     want_extension = (
-        provider == "xai" and n_parts > 1 and xai_chain_mode() == "extension"
+        provider == "xai"
+        and n_parts > 1
+        and xai_chain_mode() == "extension"
+        and any(p.get("kind") == "extension" for p in plan)
     )
 
     clip_id = "c_" + uuid.uuid4().hex[:8]
@@ -688,12 +685,9 @@ async def _api_generate_inner(pid: str, sid: str):
     partial_error: str | None = None
 
     for i in range(n_parts):
-        part_dur = unit if i < n_parts - 1 else max(1.0, dur - unit * (n_parts - 1))
-        if n_parts == 1:
-            # Single-shot: use full segment duration (capped by provider unit above).
-            part_dur = max(1.0, min(dur, unit if provider == "xai" else dur))
-        if n_parts > 1 and i == n_parts - 1 and part_dur < 2.0 and dur >= 2.0:
-            part_dur = max(2.0, dur - unit * (n_parts - 1))
+        planned = plan[i] if i < len(plan) else {"kind": "t2v", "duration_sec": unit}
+        part_dur = float(planned.get("duration_sec") or unit)
+        plan_kind = str(planned.get("kind") or "t2v")
 
         chain_here = bool(cur_start) and (chain or user_ref or i > 0)
         # shift/motion never lock; hold uses user camera_lock only
@@ -724,9 +718,10 @@ async def _api_generate_inner(pid: str, sid: str):
 
         part_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}.mp4"
 
-        # Prefer native extension when we already have a growing video ≤14.5s
+        # Prefer native extension when plan says so and we already have a growing video ≤14.5s
         try_ext = (
             want_extension
+            and plan_kind == "extension"
             and i > 0
             and accum is not None
             and accum.is_file()
@@ -937,10 +932,13 @@ async def _api_generate_inner(pid: str, sid: str):
         "subclip_count": len(subclips) or n_parts,
         "subclips": subclips,
         "duration_requested": dur,
+        "duration_plan": plan,
         "is_mock": bool(last_meta.get("is_mock")),
         "chain_mode": primary_mode,
         "xfade_seconds": xfade_seconds() if primary_mode in {"i2v", "hybrid", "i2v-fallback"} else 0,
         "partial": bool(partial_error),
+        "duration_api": last_meta.get("duration_api") or last_meta.get("duration"),
+        "duration_actual": last_meta.get("duration_actual"),
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id

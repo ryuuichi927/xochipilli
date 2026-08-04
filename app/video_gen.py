@@ -5,26 +5,112 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+# --- Provider duration contracts (must match what we send on the wire) ---
+# xAI Grok Imagine video generations: integer seconds, 1–15 inclusive.
+XAI_T2V_MIN_SEC = 1
+XAI_T2V_MAX_SEC = 15
+# xAI native Video Extension: NEW portion only, integer seconds 2–10;
+# source clip must be ~2–15s.
+XAI_EXT_MIN_SEC = 2
+XAI_EXT_MAX_SEC = 10
+XAI_EXT_SOURCE_MIN = 1.8
+XAI_EXT_SOURCE_MAX = 15.5
+
 
 def clip_unit_seconds() -> float:
-    """Default generation unit length (seconds). Longer segments are auto-split.
-
-    xAI T2V accepts up to ~15s per request; keep headroom via env CLIP_UNIT_SECONDS.
-    """
+    """Default split unit for multi-part (non–single-shot) generations."""
     try:
         v = float(os.environ.get("CLIP_UNIT_SECONDS") or "5")
     except ValueError:
         v = 5.0
-    return max(2.0, min(v, 15.0))
+    return max(2.0, min(v, float(XAI_T2V_MAX_SEC)))
 
 
 def xai_max_single_seconds() -> float:
-    """Prefer one xAI shot when segment duration fits (avoids brittle multi-part)."""
+    """Max segment length covered by one xAI T2V/I2V request."""
     try:
-        v = float(os.environ.get("XAI_MAX_SINGLE_SEC") or "15")
+        v = float(os.environ.get("XAI_MAX_SINGLE_SEC") or str(XAI_T2V_MAX_SEC))
     except ValueError:
-        v = 15.0
-    return max(5.0, min(v, 15.0))
+        v = float(XAI_T2V_MAX_SEC)
+    return max(5.0, min(v, float(XAI_T2V_MAX_SEC)))
+
+
+def clamp_xai_t2v_duration(seconds: float) -> int:
+    """Integer seconds accepted by POST /videos/generations."""
+    return int(max(XAI_T2V_MIN_SEC, min(round(float(seconds or 5)), XAI_T2V_MAX_SEC)))
+
+
+def clamp_xai_extension_duration(seconds: float) -> int:
+    """Integer seconds for NEW portion on POST /videos/extensions (2–10)."""
+    return int(max(XAI_EXT_MIN_SEC, min(round(float(seconds or 5)), XAI_EXT_MAX_SEC)))
+
+
+def plan_generation_parts(provider: str, seg_dur: float) -> list[dict[str, Any]]:
+    """Plan generation parts so each request duration is API-legal.
+
+    Returns a list of {kind, duration_sec} where duration_sec is what we pass
+    into generate_clip (float; clamped to int at the provider edge).
+
+    xAI:
+      - ≤15s → one t2v/i2v shot (no extension chain).
+      - >15s → first chunk ≤15s, then extension chunks of 2–10s only
+        (never leave a <2s tail that extension would reject or pad badly).
+    Other providers: split by CLIP_UNIT_SECONDS with a small single-part slack.
+    """
+    dur = max(0.5, float(seg_dur or 0))
+    prov = (provider or "mock").lower().strip()
+    if prov in {"grok", "grok-imagine", "xai-oauth", "imagine"}:
+        prov = "xai"
+
+    if prov == "xai":
+        max_one = xai_max_single_seconds()
+        if dur <= max_one + 0.05:
+            return [{"kind": "t2v", "duration_sec": float(clamp_xai_t2v_duration(dur))}]
+
+        # Multi-part: first shot as large as T2V allows, but leave ≥2s for a legal
+        # extension tail (never 5+… leftover 1.7 that extension cannot accept cleanly).
+        first = min(float(XAI_T2V_MAX_SEC), max(float(XAI_T2V_MIN_SEC), dur - float(XAI_EXT_MIN_SEC)))
+        parts: list[dict[str, Any]] = [
+            {"kind": "t2v", "duration_sec": float(clamp_xai_t2v_duration(first))}
+        ]
+        remaining = max(0.0, dur - parts[0]["duration_sec"])
+        while remaining > 0.05 and len(parts) < 40:
+            if remaining < XAI_EXT_MIN_SEC:
+                parts.append(
+                    {"kind": "extension", "duration_sec": float(XAI_EXT_MIN_SEC)}
+                )
+                break
+            chunk = min(float(XAI_EXT_MAX_SEC), remaining)
+            api_chunk = float(clamp_xai_extension_duration(chunk))
+            parts.append({"kind": "extension", "duration_sec": api_chunk})
+            remaining = max(0.0, remaining - api_chunk)
+        return parts
+
+    # mock / fal
+    unit = clip_unit_seconds()
+    if dur <= unit + 0.35:
+        return [{"kind": "t2v", "duration_sec": dur}]
+    n = max(1, int(__import__("math").ceil(dur / unit)))
+    parts = []
+    for i in range(n):
+        if i < n - 1:
+            parts.append({"kind": "t2v", "duration_sec": unit})
+        else:
+            parts.append({"kind": "t2v", "duration_sec": max(1.0, dur - unit * (n - 1))})
+    return parts
+
+
+def xai_duration_limits() -> dict[str, Any]:
+    return {
+        "t2v_min_sec": XAI_T2V_MIN_SEC,
+        "t2v_max_sec": XAI_T2V_MAX_SEC,
+        "extension_min_sec": XAI_EXT_MIN_SEC,
+        "extension_max_sec": XAI_EXT_MAX_SEC,
+        "extension_source_min_sec": XAI_EXT_SOURCE_MIN,
+        "extension_source_max_sec": XAI_EXT_SOURCE_MAX,
+        "prefer_single_max_sec": xai_max_single_seconds(),
+        "clip_unit_seconds": clip_unit_seconds(),
+    }
 
 
 def xai_chain_mode() -> str:
@@ -560,7 +646,8 @@ async def generate_xai_clip(
     base_url = str(creds["base_url"]).rstrip("/")
     aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
     resolution = _normalize_xai_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
-    dur = int(max(1, min(round(float(duration or 5)), 15)))
+    # API requires integer seconds 1–15 — never send fractional music length as-is.
+    dur = clamp_xai_t2v_duration(duration)
 
     use_i2v = bool(start_image and Path(start_image).is_file())
     if use_i2v:
@@ -607,6 +694,12 @@ async def generate_xai_clip(
             client, base_url, headers, request_id, out_path, timeout_s, poll_s
         )
 
+    actual = 0.0
+    try:
+        actual = probe_duration(out_path)
+    except Exception:
+        actual = 0.0
+
     return {
         "provider": "xai",
         "path": str(out_path),
@@ -615,6 +708,9 @@ async def generate_xai_clip(
         "request_id": request_id,
         "auth_source": creds.get("source"),
         "duration": dur,
+        "duration_requested": float(duration or 0),
+        "duration_api": dur,
+        "duration_actual": actual,
         "resolution": resolution,
         "aspect_ratio": aspect,
         "chained": use_i2v,
@@ -656,8 +752,8 @@ async def extend_xai_clip(
     if src_dur > 15.5:
         raise RuntimeError(f"extend: source too long ({src_dur:.2f}s); API max 15s")
 
-    # Extension length only — API range 2–10
-    ext_dur = int(max(2, min(round(float(duration or 5)), 10)))
+    # Extension length only — API range 2–10 (not the remaining music length as float).
+    ext_dur = clamp_xai_extension_duration(duration)
 
     creds = resolve_xai_credentials()
     api_key = creds["api_key"]

@@ -62,7 +62,25 @@ Expect:
 - `xai_auth.source`: e.g. `bentool-oauth`
 
 5. In the UI: segment prompt → Generate.  
-   One clip may take **tens of seconds to a few minutes**. Long segments are split into ~5s units and chained (native Extension when available, else last-frame I2V).
+   One clip may take **tens of seconds to a few minutes**.
+
+### Duration contract (xAI) — must stay aligned
+
+| Call | What we send | API limit |
+|------|----------------|-----------|
+| T2V / I2V (`/videos/generations`) | **integer** seconds | **1–15** |
+| Extension (`/videos/extensions`) | **integer** seconds of *new* tail only | **2–10**; source clip ~2–15s |
+
+Planner (`plan_generation_parts`):
+
+- Segment **≤15s** → **one** T2V/I2V shot (no 5s split). A 6.7s pin becomes `duration=7`, not 5+2.
+- Segment **>15s** → first chunk ≤15s, then extension chunks of 2–10s only (never a &lt;2s extension tail).
+- Meta stores `duration_requested` / `duration_api` / `duration_actual` (ffprobe after download).
+- If a later part fails, earlier parts are kept as a **partial take** (not discarded orphans).
+
+Optional env: `XAI_MAX_SINGLE_SEC` (default 15), `CLIP_UNIT_SECONDS` (multi-part first-chunk bias), `XAI_CHAIN_MODE=extension|i2v`.
+
+Health exposes limits under `xai_duration`.
 
 ### When OAuth expires
 
