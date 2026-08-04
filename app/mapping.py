@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Optional
 
 from .paths import THEORY
 
@@ -92,6 +92,25 @@ def _filter_soft_tags(tags: list[str], *, lock_camera: bool) -> list[str]:
     return out
 
 
+def affect_visual_hints(
+    valence: Optional[float] = None,
+    arousal: Optional[float] = None,
+) -> list[str]:
+    """Map local affect axes → short visual bias phrases (not Episode labels)."""
+    hints: list[str] = []
+    if arousal is not None:
+        if arousal >= 0.7:
+            hints.append("higher subject energy, clearer directional motion")
+        elif arousal <= 0.3:
+            hints.append("low energy, soft motion, sparse activity")
+    if valence is not None:
+        if valence <= -0.4:
+            hints.append("lower brightness, quieter palette, restrained space")
+        elif valence >= 0.4:
+            hints.append("warmer or clearer light, more open spatial feel")
+    return hints
+
+
 def compose_video_prompt(
     user_prompt: str,
     feat: dict[str, Any],
@@ -102,19 +121,20 @@ def compose_video_prompt(
     camera_lock: bool = False,
     style: str = "",
     negative_prompt: str = "",
+    valence: Optional[float] = None,
+    arousal: Optional[float] = None,
 ) -> str:
     """Build the final prompt sent to the video provider.
 
     camera_lock:
         ONLY when True (user toggle). Hard tripod lock + strip camera soft_tags.
-        Chain alone does NOT force hard lock — intentional camera language in the
-        user prompt must be allowed to win on transition / motion shots.
     chain_from_prev:
         Continuity paragraph from previous last-frame (softer than hard lock).
     style / negative_prompt:
         Optional project-level style and avoid-list.
+    valence / arousal:
+        Optional local affect axes → soft visual hints (not Episode taxonomy).
     """
-    # Hard lock is explicit only — never implied by chain alone.
     lock = bool(camera_lock)
     c = build_constraints(feat)
     soft_tags = _filter_soft_tags(list(c.get("soft_tags") or []), lock_camera=lock)
@@ -142,7 +162,6 @@ def compose_video_prompt(
             "Cinematic motion; no subtitles; no watermark."
         )
     elif chain_from_prev:
-        # Continuity without forcing a static camera — user prompt may request motion.
         parts.append(
             "CONTINUITY FROM PREVIOUS SHOT: A still of the previous clip's near-end frame "
             "is provided as the starting image. Begin from that frame and evolve into the new action. "
@@ -156,9 +175,14 @@ def compose_video_prompt(
             + ", ".join(soft_tags)
         )
 
+    affect = affect_visual_hints(valence=valence, arousal=arousal)
+    if affect:
+        parts.append(
+            "Local affect bias (soft): " + "; ".join(affect)
+        )
+
     neg = (negative_prompt or "").strip()
     if lock:
-        # Reinforce anti-camera only under explicit lock.
         if neg:
             neg = neg + ", " + DEFAULT_NEGATIVE
         else:

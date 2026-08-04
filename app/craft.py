@@ -19,13 +19,37 @@ from .video_gen import (
 )
 
 
+def _clamp(v: Any, lo: float, hi: float) -> float | None:
+    if v is None or v == "":
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return max(lo, min(hi, x))
+
+
 def enrich_new_segment(seg: dict[str, Any]) -> dict[str, Any]:
+    """Defaults for a newly pinned segment.
+
+    Does NOT stamp Episode labels on the segment (Episode is Unmatch interpretation only).
+    Optional local affect: valence (-1..1), arousal (0..1).
+    """
     kws = list(seg.get("emotion_keywords") or [])
     seg["suggested_keywords"] = list(kws)
     seg["mode"] = taste_mod.normalize_mode(seg.get("mode") or "hold")
     seg["camera_lock"] = bool(seg.get("camera_lock", False))
     seg["unmatched"] = False
     seg["unmatch"] = None
+    # local affect axes (optional; not Episode)
+    if "valence" not in seg:
+        seg["valence"] = None
+    else:
+        seg["valence"] = _clamp(seg.get("valence"), -1.0, 1.0)
+    if "arousal" not in seg:
+        seg["arousal"] = None
+    else:
+        seg["arousal"] = _clamp(seg.get("arousal"), 0.0, 1.0)
     return seg
 
 
@@ -71,9 +95,15 @@ def handle_unmatch(
     reason: str,
     editor_note: str = "",
     editor_keywords: list[str] | None = None,
+    valence: float | None = None,
+    arousal: float | None = None,
 ) -> dict[str, Any]:
     reason_n = taste_mod.normalize_reason(reason)
     suggested = list(seg.get("suggested_keywords") or seg.get("emotion_keywords") or [])
+    # prefer explicit affect from body; else segment fields
+    val = _clamp(valence if valence is not None else seg.get("valence"), -1.0, 1.0)
+    aro = _clamp(arousal if arousal is not None else seg.get("arousal"), 0.0, 1.0)
+
     entry = {
         "at": storage._now(),
         "segment_id": seg["id"],
@@ -85,6 +115,8 @@ def handle_unmatch(
         "editor_note": editor_note or "",
         "editor_keywords": list(editor_keywords or []),
         "mode": taste_mod.normalize_mode(seg.get("mode")),
+        "valence": val,
+        "arousal": aro,
         "features": seg.get("features"),
     }
     p.setdefault("unmatch_log", []).append(entry)
@@ -94,7 +126,14 @@ def handle_unmatch(
         "reason": reason_n,
         "editor_note": entry["editor_note"],
         "suggested_keywords": suggested,
+        "valence": val,
+        "arousal": aro,
     }
+    # keep last known local affect on segment when provided
+    if val is not None:
+        seg["valence"] = val
+    if aro is not None:
+        seg["arousal"] = aro
     storage.save_project(p)
     taste = taste_mod.record_unmatch(
         project_id=str(p.get("id") or ""),
@@ -103,8 +142,15 @@ def handle_unmatch(
         suggested_keywords=suggested,
         editor_note=editor_note or "",
         mode=seg.get("mode"),
+        valence=val,
+        arousal=aro,
     )
-    return {"ok": True, "entry": entry, "taste_hints": taste.get("hints") or []}
+    return {
+        "ok": True,
+        "entry": entry,
+        "taste_hints": taste.get("hints") or [],
+        "valid_reasons": list(taste_mod.VALID_REASONS),
+    }
 
 
 async def regen_subclips(
@@ -131,7 +177,7 @@ async def regen_subclips(
     clips_dir = storage.project_dir(pid) / "clips"
     clips_dir.mkdir(exist_ok=True)
     sid = str(seg["id"])
-    feat = seg.get("features") or {}
+    feat = dict(seg.get("features") or {})
     unit = float(clip.get("clip_unit_seconds") or clip_unit_seconds())
     mode_seg = taste_mod.normalize_mode(seg.get("mode"))
     cam_lock = lock_for_part(cam_lock=bool(seg.get("camera_lock")), mode=mode_seg)
@@ -155,15 +201,18 @@ async def regen_subclips(
             if cand.is_file():
                 cur_start = cand
 
+        feat_part = {**feat, "duration_sec": part_dur}
         composed = compose_video_prompt(
             seg.get("prompt") or "",
-            {**feat, "duration_sec": part_dur},
+            feat_part,
             world=world or "",
             chain_from_prev=bool(cur_start),
             user_ref_image=False,
             camera_lock=cam_lock,
             style=style or "",
             negative_prompt=negative_prompt or "",
+            valence=_clamp(seg.get("valence"), -1.0, 1.0),
+            arousal=_clamp(seg.get("arousal"), 0.0, 1.0),
         )
         out_part = clips_dir / f"{sid}-{clip['id'][2:]}-p{i:02d}-r{uuid.uuid4().hex[:4]}.mp4"
         try:

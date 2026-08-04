@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
@@ -13,13 +13,29 @@ from . import taste as taste_mod
 
 
 class UnmatchBodyV2(BaseModel):
+    """Structured Unmatch.
+
+    reason includes ``episode`` = functional mismatch (Episode Model as
+    interpretation of what was wanted vs what the picture did — not a
+    20s segment taxonomy stamp).
+    """
+
     reason: str = "other"
     editor_note: str = ""
     editor_keywords: list[str] = Field(default_factory=list)
+    valence: Optional[float] = None  # -1..1 at judgement time
+    arousal: Optional[float] = None  # 0..1
 
 
 class ModeBody(BaseModel):
     mode: str = "hold"  # hold | shift | motion
+
+
+class AffectBody(BaseModel):
+    """Optional local affect on a segment (not Episode)."""
+
+    valence: Optional[float] = None
+    arousal: Optional[float] = None
 
 
 class RegenSubclipsBody(BaseModel):
@@ -55,6 +71,28 @@ def register(app) -> None:
                 return s
         raise HTTPException(404, "segment not found")
 
+    @app.put("/api/projects/{pid}/segments/{sid}/affect")
+    def api_seg_affect(pid: str, sid: str, body: AffectBody):
+        """Set optional valence/arousal on a segment (local affect, not Episode)."""
+        try:
+            p = storage.load_project(pid)
+        except FileNotFoundError:
+            raise HTTPException(404, "project not found")
+        for s in p["segments"]:
+            if s["id"] == sid:
+                if body.valence is not None:
+                    s["valence"] = craft._clamp(body.valence, -1.0, 1.0)
+                if body.arousal is not None:
+                    s["arousal"] = craft._clamp(body.arousal, 0.0, 1.0)
+                storage.save_project(p)
+                return {
+                    "ok": True,
+                    "id": sid,
+                    "valence": s.get("valence"),
+                    "arousal": s.get("arousal"),
+                }
+        raise HTTPException(404, "segment not found")
+
     @app.post("/api/projects/{pid}/segments/{sid}/unmatch-v2")
     def api_unmatch_v2(pid: str, sid: str, body: UnmatchBodyV2):
         """Structured Unmatch with reason → taste.json. Prefer this over legacy /unmatch."""
@@ -70,6 +108,8 @@ def register(app) -> None:
                     reason=body.reason,
                     editor_note=body.editor_note,
                     editor_keywords=body.editor_keywords,
+                    valence=body.valence,
+                    arousal=body.arousal,
                 )
         raise HTTPException(404, "segment not found")
 
