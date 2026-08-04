@@ -52,9 +52,14 @@ window created → http://127.0.0.1:8787
 - **Dock bounce then die:** confirm MacOS launcher still `exec`s run.sh (not nohup+exit)
 - **White empty window (title only):**
   1. Open http://127.0.0.1:8787/ in a normal browser — if dark UI shows, the **server is fine**
-  2. `session.log` must contain `cocoa early setContentView_(WKWebView)` and `using url= navigation (single)`
+  2. `session.log` must contain `cocoa contentView=NSView container` and `using url= navigation (single)`
   3. If missing, update `desktop_app.py` and relaunch Dock (do **not** re-enable Chrome auto-launch)
-  4. Details: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E
+  4. Details: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E/G
+- **Dark UI but dead clicks / no resize:**
+  1. Confirm single `url=` path (no load_html thrash logs)
+  2. If log still has `cocoa early setContentView_(WKWebView)` → old E/F patch (Incident G)
+  3. Healthy: `contentView=NSView container + WKWebView subview` + `styleMask=… resizable=True` + `event loaded` + `nav ok`
+  4. Relaunch Dock / `./RUN_DESKTOP.sh` with latest `desktop_app.py`
 - **Traceback / icon argument:** `desktop_app.py` is patched for pywebview builds without `icon=`
 - **Port clash:** set `PORT=` in `.env`, or free 8787
 - **No pywebview:** `.venv/bin/pip install pywebview`

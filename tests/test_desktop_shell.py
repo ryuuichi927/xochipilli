@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop shell checks: native webview, no Chrome, clickable + resizable (Incident F)."""
+"""Desktop shell checks: native webview, no Chrome, clickable + resizable (Incident F/G)."""
 
 from __future__ import annotations
 
@@ -33,11 +33,14 @@ def main() -> int:
 
     for n, lab in [
         ("shell_mode=pywebview", "pywebview mode"),
-        ("_patch_cocoa_early_content_view", "early contentView patch"),
-        ("setContentView_", "setContentView call"),
+        ("_patch_cocoa_content_container", "NSView container contentView patch"),
+        ("contentView=NSView container", "container attach log"),
+        ("addSubview_", "WKWebView as subview"),
         ("contentLayoutRect", "content layout frame"),
         ("styleMask", "styleMask resizable log"),
         ("_NS_RESIZABLE", "resizable bit constant"),
+        ("setMovableByWindowBackground_", "not movable by background"),
+        ("setAcceptsMouseMovedEvents_", "accepts mouse moved"),
         ("_prepare_html", "html prepare helper kept"),
         ("_kill_legacy_chrome_app", "kill legacy chrome"),
         ("XOCHIPILLI_SHELL", "opt-in browser"),
@@ -45,8 +48,15 @@ def main() -> int:
         ("using url= navigation", "primary url= path"),
         ("nav ok — no reload", "single-nav success log"),
         ("resizable", "resizable True"),
+        ("min_size", "min_size set"),
     ]:
         (ok if n in desk else bad)(lab)
+
+    # Must not prefer direct WKWebView as contentView in happy path log
+    if "no direct setContentView WKWebView" in desk:
+        ok("avoids direct WKWebView contentView (Incident G)")
+    else:
+        bad("should log avoiding direct WKWebView contentView")
 
     # Primary path must use url=, not load_html thrashing
     if '"url": base' in desk or '"url": base,' in desk or '"url": base' in desk:
@@ -55,6 +65,12 @@ def main() -> int:
         ok("create_window uses url=")
     else:
         bad("create_window should prefer url=")
+
+    # min_size should be smaller than typical default so resize is obvious
+    if "(800, 500)" in desk or "(800,500)" in desk:
+        ok("min_size 800x500")
+    else:
+        bad("min_size should be ~800x500 for obvious resize")
 
     # Must not thrash: shown/boot must not call load_html in happy path
     for n in (
@@ -87,6 +103,7 @@ def main() -> int:
         (".gen-loader[hidden]", "gen-loader[hidden] rule"),
         (".settings-backdrop[hidden]", "settings-backdrop[hidden] rule"),
         ("pointer-events: none !important", "hidden pointer-events none"),
+        ("display: none !important", "hidden display none"),
     ]:
         (ok if n in css else bad)(lab)
 

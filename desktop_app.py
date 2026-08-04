@@ -4,15 +4,16 @@ Xochipilli desktop shell: local FastAPI + native pywebview (cocoa) only.
 No Chrome/Safari auto-launch from Dock.
 Opt-in browser: XOCHIPILLI_SHELL=browser
 
-Paint (Incident B/E): pywebview cocoa attaches WKWebView as contentView only inside
-webView_didFinishNavigation_. Until then the client area is empty/white.
-Fix: monkey-patch BrowserView.__init__ → early setContentView_ + autoresize +
-contentLayoutRect frame; keep NSResizableWindowMask.
+Paint (Incident B/E): pywebview cocoa attaches WKWebView only inside
+webView_didFinishNavigation_; until then the client area can look empty/white.
 
-Clicks/resize (Incident F): load_html thrashing (create_window html + shown + boot)
-paints CSS but races JS bootstrap / origin so handlers never bind; window may lose
-usable resize. Prefer single url=http://127.0.0.1:PORT/ navigation (real HTTP origin).
-Do not evaluate_js on full workbench (bridge hang). Do not wrap WKNavigation blocks.
+Clicks/resize (Incident F/G):
+- F: load_html thrashing broke JS handlers — use single url=http://127.0.0.1:PORT/.
+- G: early setContentView_(WKWebView) fixed white paint but broke hit-testing and
+  live resize even with styleMask resizable. Do NOT make WKWebView the window's
+  contentView. Use plain NSView container + addSubview(WKWebView) (option B).
+
+Do not evaluate_js on full workbench (bridge hang). Do not wrap decidePolicy.
 """
 
 from __future__ import annotations
@@ -245,19 +246,27 @@ def _activate_cocoa() -> None:
 _NS_RESIZABLE = 8  # AppKit.NSWindowStyleMaskResizable / NSResizableWindowMask
 
 
-def _patch_cocoa_early_content_view() -> bool:
-    """Attach WKWebView as contentView immediately (do not wait for didFinish).
+def _patch_cocoa_content_container() -> bool:
+    """Incident G: never set WKWebView as the window contentView directly.
 
-    Also: frame = content layout rect, autoresize, ensure resizable styleMask.
+    Preferred path after F: url= only + dark background. Paint used to need an
+    early attach (E), but setContentView_(WKWebView) broke hit-testing and live
+    resize even with styleMask=15. Option B: contentView = plain NSView;
+    WKWebView is a filling subview with autoresize. That keeps titlebar/resize
+    chrome intact and still paints before/without relying solely on didFinish.
+
+    pywebview's didFinish does setContentView_(webview) only when
+    ``not webview.window()``. After our container attach, webview.window() is
+    set, so didFinish skips the destructive swap and still injects the bridge.
     """
     try:
         import webview.platforms.cocoa as cocoa
-        from AppKit import NSViewHeightSizable, NSViewWidthSizable
+        from AppKit import NSView, NSViewHeightSizable, NSViewWidthSizable
     except Exception as e:
         _log(f"cocoa patch import failed: {e}")
         return False
 
-    if getattr(cocoa.BrowserView, "_xochipilli_early_cv", False):
+    if getattr(cocoa.BrowserView, "_xochipilli_cv_container", False):
         return True
 
     orig_init = cocoa.BrowserView.__init__
@@ -267,36 +276,73 @@ def _patch_cocoa_early_content_view() -> bool:
         try:
             wv = self.webview
             ns_win = self.window
-            # Match content layout (titlebar-safe), not full window frame
+
+            # Window hygiene (C-class extras without direct WK contentView)
+            try:
+                ns_win.setMovableByWindowBackground_(False)
+            except Exception as e:
+                _log(f"setMovableByWindowBackground: {e}")
+            try:
+                ns_win.setAcceptsMouseMovedEvents_(True)
+            except Exception as e:
+                _log(f"setAcceptsMouseMovedEvents: {e}")
+
+            # B: plain NSView container as contentView; WKWebView as subview only
             try:
                 if hasattr(ns_win, "contentLayoutRect"):
-                    clr = ns_win.contentLayoutRect()
-                    wv.setFrame_(clr)
+                    frame = ns_win.contentLayoutRect()
                 else:
-                    cv = ns_win.contentView()
-                    if cv is not None:
-                        wv.setFrame_(cv.bounds())
-            except Exception as e:
-                _log(f"content frame: {e}")
-            try:
+                    cv0 = ns_win.contentView()
+                    frame = cv0.bounds() if cv0 is not None else wv.frame()
+
+                container = NSView.alloc().initWithFrame_(frame)
+                container.setAutoresizingMask_(
+                    NSViewWidthSizable | NSViewHeightSizable
+                )
+                # Subview fills container in container-local coords (0,0 bounds)
+                wv.setFrame_(container.bounds())
                 wv.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-            except Exception as e:
-                _log(f"autoresize mask: {e}")
-            # Always set as content view up front — fixes pure-white empty client area
-            try:
-                ns_win.setContentView_(wv)
+                # If webview was already parented somehow, detach first
+                try:
+                    if wv.superview() is not None:
+                        wv.removeFromSuperview()
+                except Exception:
+                    pass
+                container.addSubview_(wv)
+                ns_win.setContentView_(container)
+                # Window may re-layout contentView; re-fill after attach
+                try:
+                    wv.setFrame_(container.bounds())
+                except Exception:
+                    pass
                 ns_win.makeFirstResponder_(wv)
-                _log("cocoa early setContentView_(WKWebView)")
+                self._xochipilli_container = container  # type: ignore[attr-defined]
+                _log(
+                    "cocoa contentView=NSView container + WKWebView subview "
+                    "(no direct setContentView WKWebView)"
+                )
             except Exception as e:
-                _log(f"early setContentView failed: {e}")
-            # Preserve / restore resizable + log styleMask (Incident F)
+                _log(f"container contentView failed: {e}")
+                # Last resort C: contentLayoutRect + direct webview (may break hits)
+                try:
+                    if hasattr(ns_win, "contentLayoutRect"):
+                        wv.setFrame_(ns_win.contentLayoutRect())
+                    wv.setAutoresizingMask_(
+                        NSViewWidthSizable | NSViewHeightSizable
+                    )
+                    ns_win.setContentView_(wv)
+                    ns_win.makeFirstResponder_(wv)
+                    _log("cocoa fallback setContentView_(WKWebView) contentLayoutRect")
+                except Exception as e2:
+                    _log(f"fallback setContentView failed: {e2}")
+
+            # Preserve / restore resizable + log styleMask
             try:
                 mask = int(ns_win.styleMask())
                 if (mask & _NS_RESIZABLE) == 0:
                     ns_win.setStyleMask_(mask | _NS_RESIZABLE)
                     mask = int(ns_win.styleMask())
                     _log(f"restored NSResizableWindowMask styleMask={mask}")
-                # Keep standard traffic lights visible (non-frameless)
                 try:
                     from AppKit import (
                         NSWindowCloseButton,
@@ -321,12 +367,17 @@ def _patch_cocoa_early_content_view() -> bool:
             except Exception as e:
                 _log(f"styleMask check: {e}")
         except Exception as e:
-            _log(f"cocoa early patch body failed: {e}")
+            _log(f"cocoa container patch body failed: {e}")
 
     cocoa.BrowserView.__init__ = _init  # type: ignore[method-assign]
-    cocoa.BrowserView._xochipilli_early_cv = True  # type: ignore[attr-defined]
-    _log("cocoa BrowserView.__init__ patched for early contentView")
+    cocoa.BrowserView._xochipilli_cv_container = True  # type: ignore[attr-defined]
+    _log("cocoa BrowserView.__init__ patched for NSView container contentView")
     return True
+
+
+# Back-compat name used by older docs/tests
+def _patch_cocoa_early_content_view() -> bool:
+    return _patch_cocoa_content_container()
 
 
 def _prepare_html(html: str, base: str) -> str:
@@ -363,7 +414,7 @@ def _run_pywebview(target: str) -> int:
         )
         return 1
 
-    _patch_cocoa_early_content_view()
+    _patch_cocoa_content_container()
 
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.settings["ALLOW_FILE_URLS"] = True
@@ -380,7 +431,8 @@ def _run_pywebview(target: str) -> int:
         "url": base,
         "width": 1440,
         "height": 900,
-        "min_size": (960, 640),
+        # Smaller than default so edge-drag resize is obvious (Incident G)
+        "min_size": (800, 500),
         "background_color": "#0c0e12",
         "text_select": True,
         "resizable": True,
