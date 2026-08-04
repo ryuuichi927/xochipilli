@@ -46,57 +46,110 @@ def clamp_xai_extension_duration(seconds: float) -> int:
 
 
 def plan_generation_parts(provider: str, seg_dur: float) -> list[dict[str, Any]]:
-    """Plan generation parts so each request duration is API-legal.
+    """Plan parts on the **5s unit** (CLIP_UNIT_SECONDS, default 5).
 
-    Returns a list of {kind, duration_sec} where duration_sec is what we pass
-    into generate_clip (float; clamped to int at the provider edge).
+    Product design (do not collapse short pins into one long T2V shot):
+      - 6.7s pin → **5s + 2s** (T2V then Extension / I2V).
+      - Video may be slightly longer than music (e.g. 7s video for 6.7s pin).
+      - That overhang is intentional: micro-xfade **under the start of the next
+        segment** at program stitch / continuity (not a bug).
 
-    xAI:
-      - ≤15s → one t2v/i2v shot (no extension chain).
-      - >15s → first chunk ≤15s, then extension chunks of 2–10s only
-        (never leave a <2s tail that extension would reject or pad badly).
-    Other providers: split by CLIP_UNIT_SECONDS with a small single-part slack.
+    API clamps (xAI) still apply at the wire:
+      - T2V/I2V: integer 1–15
+      - Extension new tail: integer 2–10
+      - Short last remainder <2s is padded up to 2s (feeds the next-frame fade).
     """
+    import math
+
     dur = max(0.5, float(seg_dur or 0))
+    unit = clip_unit_seconds()  # default 5 — do not raise to 15 for short pins
     prov = (provider or "mock").lower().strip()
     if prov in {"grok", "grok-imagine", "xai-oauth", "imagine"}:
         prov = "xai"
+    use_ext = prov == "xai" and xai_chain_mode() == "extension"
 
-    if prov == "xai":
-        max_one = xai_max_single_seconds()
-        if dur <= max_one + 0.05:
-            return [{"kind": "t2v", "duration_sec": float(clamp_xai_t2v_duration(dur))}]
-
-        # Multi-part: first shot as large as T2V allows, but leave ≥2s for a legal
-        # extension tail (never 5+… leftover 1.7 that extension cannot accept cleanly).
-        first = min(float(XAI_T2V_MAX_SEC), max(float(XAI_T2V_MIN_SEC), dur - float(XAI_EXT_MIN_SEC)))
-        parts: list[dict[str, Any]] = [
-            {"kind": "t2v", "duration_sec": float(clamp_xai_t2v_duration(first))}
-        ]
-        remaining = max(0.0, dur - parts[0]["duration_sec"])
-        while remaining > 0.05 and len(parts) < 40:
-            if remaining < XAI_EXT_MIN_SEC:
-                parts.append(
-                    {"kind": "extension", "duration_sec": float(XAI_EXT_MIN_SEC)}
-                )
-                break
-            chunk = min(float(XAI_EXT_MAX_SEC), remaining)
-            api_chunk = float(clamp_xai_extension_duration(chunk))
-            parts.append({"kind": "extension", "duration_sec": api_chunk})
-            remaining = max(0.0, remaining - api_chunk)
-        return parts
-
-    # mock / fal
-    unit = clip_unit_seconds()
+    # Tiny slack only (≤0.35s over one unit stays single). 6.7 must still split.
     if dur <= unit + 0.35:
+        if prov == "xai":
+            return [{"kind": "t2v", "duration_sec": float(clamp_xai_t2v_duration(dur))}]
         return [{"kind": "t2v", "duration_sec": dur}]
-    n = max(1, int(__import__("math").ceil(dur / unit)))
-    parts = []
-    for i in range(n):
-        if i < n - 1:
-            parts.append({"kind": "t2v", "duration_sec": unit})
+
+    parts: list[dict[str, Any]] = []
+    # Full units first
+    n_full = int(math.floor(dur / unit + 1e-9))
+    remainder = dur - n_full * unit
+    if remainder < 0.05:
+        n_full = max(1, n_full)
+        remainder = 0.0
+    elif remainder > 0 and n_full == 0:
+        n_full = 0
+
+    # Always emit at least one full unit when we decided to multi-split
+    if n_full < 1:
+        n_full = 1
+        remainder = max(0.0, dur - unit)
+
+    for i in range(n_full):
+        if i == 0:
+            kind = "t2v"
+            d_sec = float(clamp_xai_t2v_duration(unit)) if prov == "xai" else float(unit)
         else:
-            parts.append({"kind": "t2v", "duration_sec": max(1.0, dur - unit * (n - 1))})
+            if use_ext:
+                kind = "extension"
+                d_sec = float(clamp_xai_extension_duration(unit))
+            else:
+                kind = "i2v" if prov == "xai" else "t2v"
+                d_sec = (
+                    float(clamp_xai_t2v_duration(unit)) if prov == "xai" else float(unit)
+                )
+        parts.append({"kind": kind, "duration_sec": d_sec})
+
+    if remainder > 0.05:
+        # Last stub: pad to Extension min 2s when needed (overhang → next seg head fade)
+        if use_ext:
+            stub = remainder
+            if stub < XAI_EXT_MIN_SEC:
+                stub = float(XAI_EXT_MIN_SEC)
+            stub = min(stub, float(XAI_EXT_MAX_SEC))
+            parts.append(
+                {
+                    "kind": "extension",
+                    "duration_sec": float(clamp_xai_extension_duration(stub)),
+                    "overhang_for_next": max(0.0, stub - remainder),
+                }
+            )
+        else:
+            stub = max(1.0, remainder)
+            if prov == "xai":
+                parts.append(
+                    {
+                        "kind": "i2v",
+                        "duration_sec": float(clamp_xai_t2v_duration(stub)),
+                        "overhang_for_next": max(
+                            0.0, float(clamp_xai_t2v_duration(stub)) - remainder
+                        ),
+                    }
+                )
+            else:
+                parts.append(
+                    {
+                        "kind": "t2v",
+                        "duration_sec": float(stub),
+                        "overhang_for_next": 0.0,
+                    }
+                )
+
+    # Planned video length vs music length (for next-seg under-fade)
+    video_planned = sum(float(p["duration_sec"]) for p in parts)
+    overhang = max(0.0, video_planned - dur)
+    if overhang > 0.001 and parts:
+        parts[-1]["overhang_for_next"] = max(
+            float(parts[-1].get("overhang_for_next") or 0.0), overhang
+        )
+        for p in parts:
+            p["music_duration_sec"] = dur
+            p["video_planned_sec"] = video_planned
+
     return parts
 
 
@@ -108,8 +161,9 @@ def xai_duration_limits() -> dict[str, Any]:
         "extension_max_sec": XAI_EXT_MAX_SEC,
         "extension_source_min_sec": XAI_EXT_SOURCE_MIN,
         "extension_source_max_sec": XAI_EXT_SOURCE_MAX,
-        "prefer_single_max_sec": xai_max_single_seconds(),
         "clip_unit_seconds": clip_unit_seconds(),
+        "split_policy": "unit_5s_default",
+        "short_pin_example": "6.7s music → 5s t2v + 2s extension; ~0.3s overhang xfade under next segment",
     }
 
 

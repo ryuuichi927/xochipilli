@@ -933,6 +933,11 @@ async def _api_generate_inner(pid: str, sid: str):
         "subclips": subclips,
         "duration_requested": dur,
         "duration_plan": plan,
+        "overhang_for_next": max(
+            (float(p.get("overhang_for_next") or 0.0) for p in plan),
+            default=0.0,
+        ),
+        "video_planned_sec": sum(float(p.get("duration_sec") or 0) for p in plan),
         "is_mock": bool(last_meta.get("is_mock")),
         "chain_mode": primary_mode,
         "xfade_seconds": xfade_seconds() if primary_mode in {"i2v", "hybrid", "i2v-fallback"} else 0,

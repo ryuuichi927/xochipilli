@@ -64,23 +64,25 @@ Expect:
 5. In the UI: segment prompt → Generate.  
    One clip may take **tens of seconds to a few minutes**.
 
-### Duration contract (xAI) — must stay aligned
+### Duration contract (xAI) — 5s unit stays; wire ints clamp
 
 | Call | What we send | API limit |
 |------|----------------|-----------|
 | T2V / I2V (`/videos/generations`) | **integer** seconds | **1–15** |
 | Extension (`/videos/extensions`) | **integer** seconds of *new* tail only | **2–10**; source clip ~2–15s |
 
-Planner (`plan_generation_parts`):
+**Split policy (product — do not collapse to one long shot):**
 
-- Segment **≤15s** → **one** T2V/I2V shot (no 5s split). A 6.7s pin becomes `duration=7`, not 5+2.
-- Segment **>15s** → first chunk ≤15s, then extension chunks of 2–10s only (never a &lt;2s extension tail).
-- Meta stores `duration_requested` / `duration_api` / `duration_actual` (ffprobe after download).
-- If a later part fails, earlier parts are kept as a **partial take** (not discarded orphans).
+- Default unit = `CLIP_UNIT_SECONDS` (**5**).
+- **6.7s pin → 5s T2V + 2s Extension** (not one 7s shot).
+- Last remainder &lt;2s is padded to **2s** (API min). Planned video can be slightly longer than music (e.g. 7s video for 6.7s pin).
+- That **overhang** is intentional: micro-xfade **under the start of the next segment** at program continuity — not discarded time.
+- Meta: `duration_plan`, `overhang_for_next`, `duration_requested` / `duration_api` / `duration_actual`.
+- If a later part fails, earlier parts stay as a **partial take**.
 
-Optional env: `XAI_MAX_SINGLE_SEC` (default 15), `CLIP_UNIT_SECONDS` (multi-part first-chunk bias), `XAI_CHAIN_MODE=extension|i2v`.
+Optional env: `CLIP_UNIT_SECONDS=5`, `XAI_CHAIN_MODE=extension|i2v`, `XOCHI_XFADE_SEC` (seam glue).
 
-Health exposes limits under `xai_duration`.
+Health exposes limits under `xai_duration` (`split_policy: unit_5s_default`).
 
 ### When OAuth expires
 
