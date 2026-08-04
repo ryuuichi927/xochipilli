@@ -22,6 +22,7 @@ from .video_gen import (
     generate_clip,
     probe_duration,
     xai_chain_mode,
+    xai_max_single_seconds,
     xfade_seconds,
 )
 from .digest import digest_audio, segment_features
@@ -645,12 +646,18 @@ async def _api_generate_inner(pid: str, sid: str):
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
     tags = tags + list(seg.get("emotion_keywords") or [])
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
-    unit = clip_unit_seconds()
-    n_parts = max(1, int(math.ceil(dur / unit)))
-    if dur <= unit + 0.35:
-        n_parts = 1
-
     provider = _provider_name()
+    unit = clip_unit_seconds()
+    # xAI can do up to ~15s in one request. Splitting 6–10s into 5s parts was
+    # leaving orphan p00 files when part1 extension failed — UI showed no take.
+    if provider == "xai" and dur <= xai_max_single_seconds() + 0.05:
+        n_parts = 1
+        unit = max(unit, min(dur, xai_max_single_seconds()))
+    else:
+        n_parts = max(1, int(math.ceil(dur / unit)))
+        if dur <= unit + 0.35:
+            n_parts = 1
+
     # Internal multi-part may still use Extension; prev-segment chain already
     # cleared by apply_segment_mode when mode=shift.
     want_extension = (
@@ -678,9 +685,13 @@ async def _api_generate_inner(pid: str, sid: str):
     composed_first = ""
     accum: Path | None = None
     modes_used: list[str] = []
+    partial_error: str | None = None
 
     for i in range(n_parts):
         part_dur = unit if i < n_parts - 1 else max(1.0, dur - unit * (n_parts - 1))
+        if n_parts == 1:
+            # Single-shot: use full segment duration (capped by provider unit above).
+            part_dur = max(1.0, min(dur, unit if provider == "xai" else dur))
         if n_parts > 1 and i == n_parts - 1 and part_dur < 2.0 and dur >= 2.0:
             part_dur = max(2.0, dur - unit * (n_parts - 1))
 
@@ -770,12 +781,19 @@ async def _api_generate_inner(pid: str, sid: str):
                 )
                 mode = str(meta.get("mode") or ("i2v" if cur_start else "t2v"))
         except Exception as e:
+            # Keep completed parts as a partial take instead of discarding orphan p00.
+            if subclips or (part_path.is_file() and part_path.stat().st_size > 1000):
+                partial_error = f"part {i + 1}/{n_parts}: {e}"
+                break
             raise HTTPException(
                 502,
                 f"映像生成に失敗しました (part {i + 1}/{n_parts}): {e}",
             ) from e
 
         if meta.get("is_mock") and provider not in {"mock", ""}:
+            if subclips:
+                partial_error = f"unexpected mock under real provider (part {i + 1}/{n_parts})"
+                break
             raise HTTPException(
                 502, f"unexpected mock under real provider (part {i + 1}/{n_parts})"
             )
@@ -826,6 +844,9 @@ async def _api_generate_inner(pid: str, sid: str):
             if i == 0 and want_extension:
                 accum = part_path
 
+    if not subclips and not i2v_parts and accum is None:
+        raise HTTPException(500, "生成結果が空です" + (f" ({partial_error})" if partial_error else ""))
+
     # Assemble final output
     pure_extension = bool(accum) and not i2v_parts
     if pure_extension and accum is not None:
@@ -838,7 +859,12 @@ async def _api_generate_inner(pid: str, sid: str):
         try:
             concat_video_files(i2v_parts, out, xfade=xfade_seconds())
         except Exception as e:
-            raise HTTPException(500, f"クリップ連結に失敗しました: {e}") from e
+            # Fall back to first completed part rather than losing everything
+            if i2v_parts and i2v_parts[0].is_file():
+                out.write_bytes(i2v_parts[0].read_bytes())
+                partial_error = (partial_error or "") + f"; concat failed: {e}"
+            else:
+                raise HTTPException(500, f"クリップ連結に失敗しました: {e}") from e
     elif accum is not None:
         if accum.resolve() != out.resolve():
             out.write_bytes(accum.read_bytes())
@@ -874,18 +900,27 @@ async def _api_generate_inner(pid: str, sid: str):
     primary_mode = (
         "extension"
         if pure_extension
-        else ("hybrid" if "extension" in modes_used and any(m.startswith("i2v") for m in modes_used) else (modes_used[-1] if modes_used else "t2v"))
+        else (
+            "hybrid"
+            if "extension" in modes_used and any(m.startswith("i2v") for m in modes_used)
+            else (modes_used[-1] if modes_used else "t2v")
+        )
     )
 
     take_n = len(seg.get("clips") or []) + 1
+    note_bits = []
+    if last_meta.get("note"):
+        note_bits.append(str(last_meta.get("note")))
+    if partial_error:
+        note_bits.append(f"partial take — later parts failed: {partial_error}")
     entry = {
         "id": clip_id,
         "file": out.name,
         "provider": last_meta.get("provider"),
         "composed_prompt": composed_first,
-        "note": last_meta.get("note"),
+        "note": " · ".join(note_bits) if note_bits else last_meta.get("note"),
         "created_at": storage._now(),
-        "label": f"take {take_n}",
+        "label": f"take {take_n}" + (" (partial)" if partial_error else ""),
         "auth_source": last_meta.get("auth_source"),
         "model": last_meta.get("model"),
         "resolution": last_meta.get("resolution"),
@@ -899,18 +934,19 @@ async def _api_generate_inner(pid: str, sid: str):
         "camera_lock": bool(cam_lock),
         "segment_mode": seg_mode,
         "clip_unit_seconds": unit,
-        "subclip_count": n_parts,
+        "subclip_count": len(subclips) or n_parts,
         "subclips": subclips,
         "duration_requested": dur,
         "is_mock": bool(last_meta.get("is_mock")),
         "chain_mode": primary_mode,
         "xfade_seconds": xfade_seconds() if primary_mode in {"i2v", "hybrid", "i2v-fallback"} else 0,
+        "partial": bool(partial_error),
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id
     seg["video"] = dict(entry)
     storage.save_project(p)
-    return {"segment": seg, "meta": last_meta, "clip": entry}
+    return {"segment": seg, "meta": last_meta, "clip": entry, "partial": bool(partial_error)}
 
 
 class ClipSelectBody(BaseModel):

@@ -7,12 +7,24 @@ from typing import Any
 
 
 def clip_unit_seconds() -> float:
-    """Default generation unit length (seconds). Longer segments are auto-split."""
+    """Default generation unit length (seconds). Longer segments are auto-split.
+
+    xAI T2V accepts up to ~15s per request; keep headroom via env CLIP_UNIT_SECONDS.
+    """
     try:
         v = float(os.environ.get("CLIP_UNIT_SECONDS") or "5")
     except ValueError:
         v = 5.0
-    return max(2.0, min(v, 12.0))
+    return max(2.0, min(v, 15.0))
+
+
+def xai_max_single_seconds() -> float:
+    """Prefer one xAI shot when segment duration fits (avoids brittle multi-part)."""
+    try:
+        v = float(os.environ.get("XAI_MAX_SINGLE_SEC") or "15")
+    except ValueError:
+        v = 15.0
+    return max(5.0, min(v, 15.0))
 
 
 def xai_chain_mode() -> str:
