@@ -11,17 +11,18 @@
 - `/Applications/Xochipilli.app`（公式アイコン＝案3）
 - 実体コード: `music-film-workbench/` のクローン先
 
-## 起動の仕組み（2026-08-04 夜）
+## 起動の仕組み（2026-08-04 夜 — Chrome なし）
 macOS は **.app から Documents 内を直接 exec すると拒否**する。
 
 鎖:
 1. Dock → `/Applications/Xochipilli.app`
 2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh`（プロセスは生き残る）
 3. → `desktop_app.py` が `:8787` を起動／再利用
-4. → **Chrome 系 `--app=http://127.0.0.1:8787/`** で本番 UI  
-   だめなら Safari → 最後に pywebview
+4. → **ネイティブ pywebview 窓だけ**（Chrome は開かない）
 
-**pywebview 単体に戻さない理由:** この Mac では WKWebView が **真っ白**のまま（サーバは HTML を正しく返していた）。  
+任意: `XOCHIPILLI_SHELL=browser` のときだけシステムブラウザ。  
+以前の Chrome `--app` プロファイルは起動時に停止する。
+
 詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
 
 ## 他の起動手段

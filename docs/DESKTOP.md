@@ -11,7 +11,7 @@ Layout:
 - `/Applications/Xochipilli.app` (official icon = concept 03)
 - Source tree: your clone of `music-film-workbench/`
 
-## How launch works (fixed 2026-08-04 night)
+## How launch works (2026-08-04 night — no Chrome)
 macOS **rejects direct exec of scripts inside Documents from a .app**.
 
 Chain:
@@ -19,12 +19,13 @@ Chain:
 1. Dock → `/Applications/Xochipilli.app`
 2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh` (process stays alive)
 3. → `desktop_app.py` starts/reuses FastAPI on `:8787`
-4. → **Chrome / Edge / Brave / Arc `--app=http://127.0.0.1:8787/`** (real UI window)  
-   Fallback: Safari, then pywebview
+4. → **native pywebview window only** (WKWebView). **Does not open Google Chrome.**
 
-**Why not pywebview alone?** On this Mac WKWebView stayed **pure white** while the same URL returned full HTML to urllib. See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md).
+Optional: `XOCHIPILLI_SHELL=browser` opens the system browser (opt-in only).
 
-Profile dir: `~/Library/Application Support/Xochipilli/chrome-app-profile`
+Legacy Chrome `--app` profiles are **killed on launch** so old sessions do not reappear.
+
+See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md).
 ## Other ways to start
 
 | Method | Path |

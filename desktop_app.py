@@ -1,12 +1,8 @@
 """
-Xochipilli desktop shell: local FastAPI + stable UI window.
+Xochipilli desktop shell: local FastAPI + **native pywebview window only**.
 
-Shell priority
-1. Chromium --app= (Chrome / Edge / Brave / Arc) with **profile-based lifetime**
-   (do NOT wait on the first Popen pid — Chrome handoff exits with code=-5 on macOS
-   and looks like “fullscreen killed the app”)
-2. Safari
-3. pywebview last resort
+Chrome / Safari are NOT opened from Dock (user request 2026-08-04).
+Optional escape hatch: XOCHIPILLI_SHELL=browser opens the system default browser.
 
 Usage:
   .venv/bin/python desktop_app.py
@@ -26,6 +22,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 # Strip agent/Ben's Tool pollution before any third-party import
@@ -48,19 +45,7 @@ PORT = int(os.environ.get("PORT", "8787"))
 URL = f"http://{HOST}:{PORT}"
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
-CHROME_PROFILE = SUPPORT / "chrome-app-profile"
-
-# Stable flags for macOS app windows (avoid GPU/session flakiness)
-_CHROME_BASE_FLAGS = (
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-session-crashed-bubble",
-    "--disable-infobars",
-    "--disable-features=Translate,MediaRouter",
-    # Keep process model boring; reduces odd parent-exit (-5 / SIGTRAP) on FS transitions
-    "--disable-background-mode",
-    "--window-size=1440,900",
-)
+CHROME_PROFILE = SUPPORT / "chrome-app-profile"  # legacy; kill on launch if still running
 
 
 def _log(msg: str) -> None:
@@ -152,9 +137,7 @@ def _start_server() -> subprocess.Popen | None:
                 _log(f"reuse server at {URL} (became healthy)")
                 return None
             time.sleep(0.25)
-        msg = (
-            f"ポート {PORT} は使われているが Xochipilli の /api/health が応答しない。"
-        )
+        msg = f"ポート {PORT} は使われているが Xochipilli の /api/health が応答しない。"
         _log(f"WARN: {msg}")
         _alert(msg, critical=True)
 
@@ -223,176 +206,243 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
             proc.kill()
 
 
-_CHROME_BINS = (
-    ("Google Chrome", Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
-    ("Microsoft Edge", Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")),
-    ("Brave Browser", Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")),
-    ("Chromium", Path("/Applications/Chromium.app/Contents/MacOS/Chromium")),
-    ("Arc", Path("/Applications/Arc.app/Contents/MacOS/Arc")),
-)
-
-
-def _find_chromium() -> tuple[str, Path] | None:
-    for name, p in _CHROME_BINS:
-        if p.is_file():
-            return name, p
-    return None
-
-
-def _profile_pids(profile: Path) -> list[int]:
-    """PIDs whose command line references this user-data-dir."""
-    needle = str(profile)
+def _kill_legacy_chrome_app() -> None:
+    """Stop previous --app chrome profile so Dock never leaves a Chrome window around."""
     try:
         r = subprocess.run(
-            ["pgrep", "-f", needle],
+            ["pgrep", "-f", str(CHROME_PROFILE)],
             capture_output=True,
             text=True,
             check=False,
         )
     except OSError:
-        return []
-    if r.returncode not in (0, 1):
-        return []
-    out: list[int] = []
-    for line in (r.stdout or "").split():
-        try:
-            out.append(int(line))
-        except ValueError:
-            continue
-    return out
-
-
-def _wait_until_profile_quiet(profile: Path, *, grace_s: float = 1.25) -> None:
-    """Block while any process uses the Chrome profile. Survive parent handoff."""
-    # Appear
-    appeared = False
-    for _ in range(80):  # ~12s
-        pids = _profile_pids(profile)
-        if pids:
-            appeared = True
-            _log(f"profile live pids={pids[:8]}{'…' if len(pids) > 8 else ''}")
-            break
-        time.sleep(0.15)
-    if not appeared:
-        _log("WARN: no chromium profile process appeared")
         return
-
-    # Stay until gone (with short grace so FS / process restart does not kill us)
-    gone_since: float | None = None
-    while True:
-        pids = _profile_pids(profile)
-        if pids:
-            gone_since = None
-        else:
-            now = time.monotonic()
-            if gone_since is None:
-                gone_since = now
-            elif now - gone_since >= grace_s:
-                _log("profile processes gone — UI closed")
-                return
-        time.sleep(0.4)
+    pids = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip().isdigit()]
+    if not pids:
+        return
+    _log(f"stopping legacy chrome-app profile pids={pids[:12]}")
+    subprocess.run(["pkill", "-f", str(CHROME_PROFILE)], check=False, capture_output=True)
+    time.sleep(0.35)
 
 
-def _open_chromium_app(url: str) -> bool:
-    found = _find_chromium()
-    if not found:
-        return False
-    name, binary = found
-    profile = CHROME_PROFILE
-    profile.mkdir(parents=True, exist_ok=True)
-    target = url if url.endswith("/") else url + "/"
-
-    # Prefer macOS open -na (proper LaunchServices); also direct exec fallback.
-    args = [
-        f"--app={target}",
-        f"--user-data-dir={profile}",
-        *_CHROME_BASE_FLAGS,
-    ]
-    extra = os.environ.get("XOCHIPILLI_CHROME_FLAGS", "").strip()
-    if extra:
-        args.extend(extra.split())
-
-    _log(f"chromium app mode: {name} → {target}")
-    _log(f"profile={profile}")
-
-    # Direct spawn WITHOUT start_new_session (avoids odd session/signal -5)
+def _activate_cocoa() -> None:
     try:
-        subprocess.Popen(
-            [str(binary), *args],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=False,
-        )
-    except OSError as e:
-        _log(f"direct chromium spawn failed: {e}; trying open -na")
-        try:
-            subprocess.run(
-                ["/usr/bin/open", "-na", name, "--args", *args],
-                check=False,
-                capture_output=True,
-            )
-        except OSError as e2:
-            _log(f"open -na failed: {e2}")
-            return False
+        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
 
-    print(f"[xochipilli] shell_mode=chromium-app engine={name}", flush=True)
-    _wait_until_profile_quiet(profile)
-    return True
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        app.activateIgnoringOtherApps_(True)
+        _log("cocoa activateIgnoringOtherApps")
+    except Exception as e:
+        _log(f"cocoa activate skipped: {e}")
 
 
-def _open_safari(url: str) -> bool:
-    target = url if url.endswith("/") else url + "/"
+def _fetch_index_html() -> str | None:
     try:
-        subprocess.run(
-            ["/usr/bin/open", "-a", "Safari", target],
-            check=False,
-            capture_output=True,
-        )
-        _log(f"opened Safari {target}")
-        print("[xochipilli] shell_mode=safari", flush=True)
-        return True
-    except OSError as e:
-        _log(f"Safari open failed: {e}")
-        return False
+        with urllib.request.urlopen(f"{URL}/", timeout=3.0) as r:
+            if r.status != 200:
+                return None
+            return r.read().decode("utf-8", "replace")
+    except Exception as e:
+        _log(f"fetch index failed: {e}")
+        return None
 
 
-def _run_pywebview(url: str) -> int:
+def _absolutize_html(html: str, base: str) -> str:
+    """Point /static and root-relative assets at the live server origin."""
+    b = base if base.endswith("/") else base + "/"
+    return (
+        html.replace('href="/static/', f'href="{b}static/')
+        .replace("href='/static/", f"href='{b}static/")
+        .replace('src="/static/', f'src="{b}static/')
+        .replace("src='/static/", f"src='{b}static/")
+        .replace('href="/favicon', f'href="{b}favicon')
+        .replace('action="/', f'action="{b}')
+    )
+
+
+def _run_pywebview(target: str) -> int:
     try:
         import webview
     except ImportError:
-        _alert("Chrome も pywebview も使えません。", critical=True)
+        _alert(
+            "pywebview が入っていない。\n"
+            f"{VENV_PY} -m pip install pywebview\n"
+            "Dock からは Chrome を自動起動しません。",
+            critical=True,
+        )
         return 1
 
-    target = url if url.endswith("/") else url + "/"
-    kwargs = {
+    # Prefer dark empty frame over pure white while loading
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    webview.settings["ALLOW_FILE_URLS"] = True
+
+    storage = SUPPORT / "webview"
+    storage.mkdir(parents=True, exist_ok=True)
+
+    base = target if target.endswith("/") else target + "/"
+    html = _fetch_index_html()
+    html_abs = _absolutize_html(html, base) if html else None
+
+    # Strategy: load_html with http base_uri so WKWebView origin is the API host.
+    # Fallback: plain url= if html fetch failed.
+    window_kwargs: dict = {
         "title": "Xochipilli",
-        "url": target,
         "width": 1440,
         "height": 900,
         "min_size": (960, 640),
         "background_color": "#0c0e12",
         "text_select": True,
         "resizable": True,
+        "confirm_close": False,
+        "focus": True,
     }
-    try:
-        webview.create_window(**kwargs)
-    except TypeError:
-        kwargs.pop("text_select", None)
-        webview.create_window(**kwargs)
+    if html_abs:
+        window_kwargs["html"] = html_abs
+    else:
+        window_kwargs["url"] = base
 
-    print("[xochipilli] shell_mode=pywebview-fallback", flush=True)
-    storage = SUPPORT / "webview"
-    storage.mkdir(parents=True, exist_ok=True)
     try:
-        webview.start(private_mode=False, storage_path=str(storage))
+        window = webview.create_window(**window_kwargs)
+    except TypeError:
+        window_kwargs.pop("text_select", None)
+        window_kwargs.pop("focus", None)
+        window = webview.create_window(**window_kwargs)
+
+    print("[xochipilli] shell_mode=pywebview", flush=True)
+    _log(f"window created mode={'html' if html_abs else 'url'} → {base}")
+
+    loaded_once = {"ok": False}
+
+    def _on_shown() -> None:
+        _log("event shown")
+        _activate_cocoa()
+        # Ensure base URL for relative /api fetches if html path used without working base
+        if html_abs:
+            try:
+                # inject <base> if missing and force navigation if body empty
+                window.evaluate_js(
+                    f"""
+                    (function() {{
+                      if (!document.querySelector('base')) {{
+                        var b = document.createElement('base');
+                        b.href = {base!r};
+                        document.head.insertBefore(b, document.head.firstChild);
+                      }}
+                      var text = (document.body && document.body.innerText || '').trim();
+                      if (!text || text.length < 8) {{
+                        location.replace({base!r});
+                      }}
+                      return document.body ? document.body.innerText.slice(0,40) : 'no-body';
+                    }})()
+                    """
+                )
+            except Exception as e:
+                _log(f"shown evaluate_js: {e}")
+                try:
+                    window.load_url(base)
+                    _log(f"fallback load_url {base}")
+                except Exception as e2:
+                    _log(f"load_url failed: {e2}")
+
+    def _on_loaded() -> None:
+        loaded_once["ok"] = True
+        _log("event loaded")
+        try:
+            snippet = window.evaluate_js(
+                "(document.body && (document.body.innerText||'').trim().slice(0,60)) || ''"
+            )
+            _log(f"dom snippet={snippet!r}")
+            # If still blank after load, hard navigate
+            if not snippet or len(str(snippet).strip()) < 4:
+                _log("blank DOM after loaded → load_url")
+                window.load_url(base)
+        except Exception as e:
+            _log(f"loaded check: {e}")
+
+    try:
+        window.events.shown += _on_shown
+        window.events.loaded += _on_loaded
+    except Exception as e:
+        _log(f"events hook skipped: {e}")
+
+    # After GUI loop is up, apply base_uri load_html (more reliable on cocoa than create html=)
+    def _boot() -> None:
+        time.sleep(0.15)
+        _activate_cocoa()
+        if html_abs:
+            try:
+                window.load_html(html_abs, base_uri=base)
+                _log(f"load_html base_uri={base} bytes={len(html_abs)}")
+            except TypeError:
+                try:
+                    window.load_html(html_abs)
+                    _log(f"load_html (no base_uri) bytes={len(html_abs)}")
+                except Exception as e:
+                    _log(f"load_html failed: {e}")
+                    try:
+                        window.load_url(base)
+                    except Exception as e2:
+                        _log(f"load_url failed: {e2}")
+            except Exception as e:
+                _log(f"load_html failed: {e}")
+                try:
+                    window.load_url(base)
+                    _log(f"load_url {base}")
+                except Exception as e2:
+                    _log(f"load_url failed: {e2}")
+        else:
+            try:
+                window.load_url(base)
+                _log(f"load_url {base}")
+            except Exception as e:
+                _log(f"load_url failed: {e}")
+
+        # Second chance if still blank
+        time.sleep(1.2)
+        if not loaded_once["ok"]:
+            _log("no loaded event yet → force load_url")
+            try:
+                window.load_url(base)
+            except Exception as e:
+                _log(f"force load_url failed: {e}")
+
+    try:
+        webview.start(
+            func=_boot,
+            gui="cocoa",
+            private_mode=False,
+            storage_path=str(storage),
+            debug=False,
+        )
     except TypeError:
         try:
-            webview.start(private_mode=False)
+            webview.start(func=_boot, private_mode=False, storage_path=str(storage))
         except TypeError:
-            webview.start()
+            try:
+                webview.start(func=_boot, private_mode=False)
+            except TypeError:
+                webview.start()
     except Exception:
         traceback.print_exc()
+        _alert("ネイティブ窓の表示に失敗した。session.log を確認。", critical=True)
         return 1
+
+    _log("webview.start returned (window closed)")
+    return 0
+
+
+def _run_browser_only(target: str) -> int:
+    """Opt-in only: XOCHIPILLI_SHELL=browser"""
+    _log(f"shell_mode=browser (explicit) → {target}")
+    print("[xochipilli] shell_mode=browser", flush=True)
+    webbrowser.open(target)
+    _alert(
+        "ブラウザで開きました（XOCHIPILLI_SHELL=browser）。\n"
+        "通常の Dock 起動はネイティブ窓のみです。",
+        critical=False,
+    )
+    time.sleep(1.0)
     return 0
 
 
@@ -403,6 +453,9 @@ def main() -> int:
 
     _log(f"desktop_app start pid={os.getpid()} py={sys.executable}")
     _log(f"sys.path[0:4]={sys.path[:4]}")
+
+    # Never leave a previous Chrome --app session hanging off Dock
+    _kill_legacy_chrome_app()
 
     server = _start_server()
     atexit.register(_stop_server, server)
@@ -418,16 +471,13 @@ def main() -> int:
         )
 
     target = f"{URL}/"
+    shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview").strip().lower()
 
-    if _open_chromium_app(target):
+    if shell in ("browser", "chrome", "safari", "system"):
+        # Explicit opt-in only — never default
+        rc = _run_browser_only(target)
         _stop_server(server)
-        return 0
-
-    if _open_safari(target):
-        # Keep helper alive a bit so Dock bounce is not instant-death
-        time.sleep(2.0)
-        _stop_server(server)
-        return 0
+        return rc
 
     rc = _run_pywebview(target)
     _stop_server(server)
