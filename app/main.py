@@ -29,6 +29,7 @@ from .mapping import build_constraints, compose_video_prompt
 from .paths import ROOT, STATIC
 from . import storage
 from . import craft
+from . import taste as taste_mod
 from .program_export import build_program_mp4
 
 # Load project .env (FAL_KEY, VIDEO_PROVIDER, …). Does not override already-set env.
@@ -45,6 +46,9 @@ class WorldBody(BaseModel):
     title: Optional[str] = None
     lyrics: Optional[str] = None
     bar_mode: Optional[str] = None
+    style: Optional[str] = None
+    negative_prompt: Optional[str] = None
+    apply_taste: Optional[bool] = None
 
 
 class ProjectRestoreBody(BaseModel):
@@ -52,6 +56,9 @@ class ProjectRestoreBody(BaseModel):
     segments: list[Any] = Field(default_factory=list)
     open_pin: Optional[float] = None
     world: str = ""
+    style: str = ""
+    negative_prompt: str = ""
+    apply_taste: Optional[bool] = None
     lyrics: Optional[str] = None
     bar_mode: Optional[str] = None
     program: Optional[dict[str, Any]] = None
@@ -190,6 +197,12 @@ def api_patch_project(pid: str, body: WorldBody):
         if body.bar_mode not in ("waveform", "lyrics", "both"):
             raise HTTPException(400, "bar_mode must be waveform|lyrics|both")
         p["bar_mode"] = body.bar_mode
+    if body.style is not None:
+        p["style"] = str(body.style)[:4000]
+    if body.negative_prompt is not None:
+        p["negative_prompt"] = str(body.negative_prompt)[:4000]
+    if body.apply_taste is not None:
+        p["apply_taste"] = bool(body.apply_taste)
     return storage.public_project(storage.save_project(p))
 
 
@@ -247,6 +260,10 @@ def api_restore_project(pid: str, body: ProjectRestoreBody):
     p["segments"] = clean
     p["open_pin"] = body.open_pin
     p["world"] = body.world or ""
+    p["style"] = body.style or ""
+    p["negative_prompt"] = body.negative_prompt or ""
+    if body.apply_taste is not None:
+        p["apply_taste"] = bool(body.apply_taste)
     if body.lyrics is not None:
         p["lyrics"] = body.lyrics
     if body.bar_mode is not None:
@@ -657,6 +674,14 @@ async def _api_generate_inner(pid: str, sid: str):
         # shift/motion never lock; hold uses user camera_lock only
         lock_here = craft.lock_for_part(cam_lock=cam_lock, mode=seg_mode)
 
+        apply_taste = p.get("apply_taste")
+        if apply_taste is None:
+            apply_taste = True
+        st, neg = taste_mod.merge_prompt_fields(
+            style=p.get("style") or "",
+            negative_prompt=p.get("negative_prompt") or "",
+            apply_taste=bool(apply_taste),
+        )
         composed = compose_video_prompt(
             seg["prompt"],
             {**feat, "duration_sec": part_dur},
@@ -664,6 +689,10 @@ async def _api_generate_inner(pid: str, sid: str):
             chain_from_prev=chain_here and not (user_ref and i == 0),
             user_ref_image=bool(user_ref and i == 0),
             camera_lock=lock_here,
+            style=st,
+            negative_prompt=neg,
+            valence=craft._clamp(seg.get("valence"), -1.0, 1.0),
+            arousal=craft._clamp(seg.get("arousal"), 0.0, 1.0),
         )
         if i == 0:
             composed_first = composed

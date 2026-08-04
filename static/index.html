@@ -6,8 +6,8 @@
   <title>ショチピリ</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
   <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/style.css?v=craft3" />
-  <link rel="stylesheet" href="/static/craft_ui.css?v=craft3" />
+  <link rel="stylesheet" href="/static/style.css?v=craft4" />
+  <link rel="stylesheet" href="/static/craft_ui.css?v=craft4" />
 </head>
 <body>
   <header class="top">
@@ -100,6 +100,15 @@
         <div class="panel panel-soft panel-world">
           <div class="panel-h" data-i18n="worldTitle">世界観（任意）</div>
           <textarea id="world" rows="2" data-i18n-placeholder="worldPh" placeholder="色・時代・禁止モチーフ。全区間の生成に添えます。"></textarea>
+          <div class="panel-h panel-h-sub" data-i18n="styleTitle">共通スタイル</div>
+          <textarea id="projStyle" rows="2" data-i18n-placeholder="stylePh" placeholder="手描き線・限定パレットなど。全区間の STYLE LOCK に入ります。"></textarea>
+          <div class="panel-h panel-h-sub" data-i18n="negativeTitle">避けたいもの（ネガ）</div>
+          <textarea id="projNegative" rows="2" data-i18n-placeholder="negativePh" placeholder="字幕、ロゴ、ディズニーっぽさ など"></textarea>
+          <label class="sync-label taste-apply-row">
+            <input id="applyTaste" type="checkbox" checked />
+            <span data-i18n="applyTaste">Unmatch の傾向を次の生成に反映</span>
+          </label>
+          <p class="hint hint-compact" id="tasteHintsLine"></p>
           <button id="btnSaveMeta" type="button" class="ghost" data-i18n="btnSave">保存</button>
         </div>
       </div>
@@ -165,9 +174,9 @@
     </div>
   </div>
 
-  <script src="/static/lang_boot.js?v=craft3"></script>
-  <script src="/static/i18n.js?v=craft3"></script>
-  <script src="/static/app.js?v=craft3"></script>
-  <script src="/static/craft_ui.js?v=craft3"></script>
+  <script src="/static/lang_boot.js?v=craft4"></script>
+  <script src="/static/i18n.js?v=craft4"></script>
+  <script src="/static/app.js?v=craft4"></script>
+  <script src="/static/craft_ui.js?v=craft4"></script>
 </body>
 </html>

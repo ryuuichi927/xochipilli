@@ -219,6 +219,9 @@ def new_project(title: str = "Untitled") -> dict[str, Any]:
         "created_at": _now(),
         "updated_at": _now(),
         "world": "",
+        "style": "",
+        "negative_prompt": "",
+        "apply_taste": True,
         "lyrics": "",
         "bar_mode": "waveform",  # waveform | lyrics | both
         "source_audio": None,

@@ -128,6 +128,14 @@ def register(app) -> None:
         clip = next((c for c in clips if c.get("id") == clip_id), None)
         if not clip:
             raise HTTPException(404, "clip not found")
+        apply_t = p.get("apply_taste")
+        if apply_t is None:
+            apply_t = True
+        st, neg = taste_mod.merge_prompt_fields(
+            style=p.get("style") or "",
+            negative_prompt=p.get("negative_prompt") or "",
+            apply_taste=bool(apply_t),
+        )
         updated = await craft.regen_subclips(
             pid=pid,
             seg=seg,
@@ -135,8 +143,8 @@ def register(app) -> None:
             indices=body.indices,
             world=p.get("world") or "",
             provider=_provider_name(),
-            style=p.get("style") or "",
-            negative_prompt=p.get("negative_prompt") or "",
+            style=st,
+            negative_prompt=neg,
         )
         for i, c in enumerate(seg.get("clips") or []):
             if c.get("id") == clip_id:

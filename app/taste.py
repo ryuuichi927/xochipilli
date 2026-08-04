@@ -196,8 +196,91 @@ def build_hints(taste: dict[str, Any]) -> list[str]:
     return hints[:6]
 
 
+def prompt_bias(taste: dict[str, Any] | None = None) -> dict[str, str]:
+    """Soft style / negative fragments for compose_video_prompt (auto-apply).
+
+    Kept conservative: only strong repeated signals, never override user STYLE LOCK text.
+    """
+    t = taste if isinstance(taste, dict) else load_taste()
+    style_bits: list[str] = []
+    neg_bits: list[str] = []
+
+    rk = t.get("rejected_keywords") or {}
+    if isinstance(rk, dict):
+        top = sorted(rk.items(), key=lambda x: (-int(x[1] or 0), str(x[0])))[:5]
+        strong = [str(k).strip() for k, v in top if int(v or 0) >= 2 and str(k).strip()]
+        if strong:
+            neg_bits.append(
+                "avoid mood/looks the editor often rejected: " + ", ".join(strong)
+            )
+
+    rc = t.get("reason_counts") or {}
+    if isinstance(rc, dict) and rc:
+        top_r = sorted(rc.items(), key=lambda x: (-int(x[1] or 0), str(x[0])))
+        label, n = top_r[0][0], int(top_r[0][1] or 0)
+        if n >= 2:
+            if label == "episode":
+                style_bits.append(
+                    "prioritize the intended listening function of the segment "
+                    "(calm / drive / focus as the user prompt implies); "
+                    "do not default to high-arousal trailer energy"
+                )
+            elif label == "emotion":
+                style_bits.append(
+                    "match emotional temperature carefully; avoid generic hype or wrong affect"
+                )
+            elif label == "world":
+                style_bits.append(
+                    "stay inside the established world/palette; no random setting reset"
+                )
+            elif label == "camera":
+                style_bits.append(
+                    "respect camera intent; no unsolicited flashy camera tricks"
+                )
+            elif label == "style":
+                style_bits.append(
+                    "preserve author visual style; avoid disney / generic stock CGI look"
+                )
+
+    samples = list(t.get("affect_samples") or [])
+    aros = [float(s["arousal"]) for s in samples if isinstance(s, dict) and s.get("arousal") is not None]
+    if len(aros) >= 3:
+        mean_a = sum(aros[:8]) / min(8, len(aros))
+        if mean_a >= 0.65:
+            style_bits.append("slightly lower kinetic intensity than a typical trailer cut")
+            neg_bits.append("hyperactive camera, seizure-cut editing energy")
+        elif mean_a <= 0.35:
+            style_bits.append("allow gentle living motion; avoid frozen still-life stagnation")
+
+    return {
+        "style_extra": "; ".join(style_bits[:3]).strip(),
+        "negative_extra": ", ".join(neg_bits[:4]).strip(),
+    }
+
+
+def merge_prompt_fields(
+    *,
+    style: str = "",
+    negative_prompt: str = "",
+    apply_taste: bool = True,
+) -> tuple[str, str]:
+    """Combine project style/negative with optional taste bias."""
+    st = (style or "").strip()
+    neg = (negative_prompt or "").strip()
+    if apply_taste:
+        bias = prompt_bias()
+        se = (bias.get("style_extra") or "").strip()
+        ne = (bias.get("negative_extra") or "").strip()
+        if se:
+            st = f"{st}\n{se}".strip() if st else se
+        if ne:
+            neg = f"{neg}, {ne}".strip(", ").strip() if neg else ne
+    return st, neg
+
+
 def public_taste() -> dict[str, Any]:
     t = load_taste()
+    bias = prompt_bias(t)
     return {
         "ok": True,
         "version": int(t.get("version") or 2),
@@ -209,5 +292,6 @@ def public_taste() -> dict[str, Any]:
         "affect_samples": (t.get("affect_samples") or [])[:8],
         "valid_reasons": list(VALID_REASONS),
         "hints": t.get("hints") or build_hints(t),
+        "prompt_bias": bias,
         "updated_at": t.get("updated_at"),
     }

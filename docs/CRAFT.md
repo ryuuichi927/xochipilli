@@ -78,3 +78,17 @@ Personalization and segment craft controls for Xochipilli.
 - Path: `data/user/taste.json` (gitignored)
 - `episode_mismatch_count`, `affect_samples`, `reason_counts.episode`
 - Local-only; not uploaded with the repo
+- **Auto-apply (default on):** `taste.merge_prompt_fields` soft-merges repeated Unmatch signals into STYLE / NEGATIVE on generate & partial regen
+- Project fields: `style`, `negative_prompt`, `apply_taste` (PATCH `/api/projects/{pid}`)
+- UI: world panel + style/negative + taste toggle + gen cost estimate + subclip chips
+
+## Prompt compose inputs (generate)
+
+| Input | Source |
+|-------|--------|
+| user prompt | segment |
+| world | project |
+| style | project + optional taste bias |
+| negative | project + optional taste bias |
+| valence / arousal | segment affect |
+| mode → chain/lock | craft layer |

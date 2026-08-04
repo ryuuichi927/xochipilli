@@ -42,6 +42,9 @@ const state = {
     max: 40,
     applying: false,
   },
+  /** last /api/health payload (clip_unit_seconds etc.) */
+  health: null,
+  taste: null,
 };
 
 function detectLang() {
@@ -154,11 +157,70 @@ function cloneEditableSnapshot(project) {
       segments: project.segments || [],
       open_pin: project.open_pin ?? null,
       world: project.world || "",
+      style: project.style || "",
+      negative_prompt: project.negative_prompt || "",
+      apply_taste: project.apply_taste !== false,
       lyrics: project.lyrics ?? "",
       bar_mode: project.bar_mode || "waveform",
       program: project.program ?? null,
     })
   );
+}
+
+function fillProjectMetaFields(p) {
+  if (!p) return;
+  if ($("world")) $("world").value = p.world || "";
+  if ($("projStyle")) $("projStyle").value = p.style || "";
+  if ($("projNegative")) $("projNegative").value = p.negative_prompt || "";
+  if ($("applyTaste")) $("applyTaste").checked = p.apply_taste !== false;
+  if ($("lyrics")) $("lyrics").value = p.lyrics || "";
+}
+
+function collectMetaBody(extra) {
+  const barMode =
+    document.querySelector('input[name="barMode"]:checked')?.value || "waveform";
+  return {
+    world: $("world") ? $("world").value : "",
+    style: $("projStyle") ? $("projStyle").value : "",
+    negative_prompt: $("projNegative") ? $("projNegative").value : "",
+    apply_taste: $("applyTaste") ? !!$("applyTaste").checked : true,
+    lyrics: $("lyrics") ? $("lyrics").value : "",
+    bar_mode: barMode,
+    ...(extra || {}),
+  };
+}
+
+function estimateApiParts(seg) {
+  const unit = Number(state.health?.clip_unit_seconds) || 5;
+  const dur = Math.max(0, Number(seg?.t1) - Number(seg?.t0) || 0);
+  if (dur <= 0) return 1;
+  if (dur <= unit + 0.35) return 1;
+  return Math.max(1, Math.ceil(dur / unit));
+}
+
+async function refreshTasteHints() {
+  const line = $("tasteHintsLine");
+  if (!line) return;
+  try {
+    const data = await api("/api/taste");
+    state.taste = data;
+    const hints = data.hints || [];
+    if (!hints.length) {
+      line.textContent = t("tasteHintsEmpty");
+      return;
+    }
+    line.textContent = t("tasteHintsLabel") + " " + hints.slice(0, 3).join(" · ");
+  } catch (_) {
+    line.textContent = "";
+  }
+}
+
+function genButtonLabel(seg) {
+  const base = seg.video ? t("btnRegen") : t("btnGen");
+  const n = estimateApiParts(seg);
+  const unit = Number(state.health?.clip_unit_seconds) || 5;
+  if (n <= 1) return `${base} · ~${unit}s×1`;
+  return t("btnGenCost", { base, n, unit });
 }
 
 function resetHistory(project, label = "load") {
@@ -213,8 +275,7 @@ async function applyHistoryEntry(entry, verb) {
     renderSegments();
     updatePinUi();
     applyBarMode(state.project.bar_mode || "waveform");
-    if ($("world")) $("world").value = state.project.world || "";
-    if ($("lyrics")) $("lyrics").value = state.project.lyrics || "";
+    fillProjectMetaFields(state.project);
     setStatus(
       verb === "undo"
         ? t("statusUndo", { label: entry.label || "" })
@@ -558,8 +619,7 @@ async function loadProject(id) {
     state.lastPinTime = p.segments[p.segments.length - 1].t1;
   }
   resetViewFull();
-  $("world").value = p.world || "";
-  $("lyrics").value = p.lyrics || "";
+  fillProjectMetaFields(p);
   const mode = p.bar_mode || "waveform";
   for (const r of document.querySelectorAll('input[name="barMode"]')) {
     r.checked = r.value === mode;
@@ -577,6 +637,7 @@ async function loadProject(id) {
     p.digest ? t("statusDigested", { id: p.digest.theory_id }) : t("statusNoImport")
   );
   prefetchAdoptedClips().catch(() => {});
+  refreshTasteHints().catch(() => {});
 }
 
 function bindAudio(pid, hasSource) {
@@ -1574,7 +1635,11 @@ function renderSegments() {
     const bGen = document.createElement("button");
     bGen.type = "button";
     bGen.className = "primary";
-    bGen.textContent = s.video ? t("btnRegen") : t("btnGen");
+    bGen.textContent = genButtonLabel(s);
+    bGen.title = t("btnGenCostHint", {
+      n: estimateApiParts(s),
+      unit: Number(state.health?.clip_unit_seconds) || 5,
+    });
     bGen.disabled = state.genInflight.has(s.id);
     bGen.onclick = (ev) => {
       ev.preventDefault();
@@ -1670,7 +1735,7 @@ function renderSegments() {
           note.textContent = c.note;
           left.appendChild(note);
         }
-        // Partial regen (subclips)
+        // Partial regen (subclips) — chips + optional free text
         const subs = c.subclips || [];
         if (subs.length > 1) {
           const regenRow = document.createElement("div");
@@ -1679,11 +1744,37 @@ function renderSegments() {
           regenLab.className = "mini";
           regenLab.textContent = t("regenSubclips") + ":";
           regenRow.appendChild(regenLab);
+          const chipWrap = document.createElement("div");
+          chipWrap.className = "regen-chips";
+          const selected = new Set();
           const regenIn = document.createElement("input");
           regenIn.type = "text";
           regenIn.className = "regen-input";
           regenIn.placeholder = t("regenPlaceholder");
           regenIn.title = t("regenHelp");
+          const syncInput = () => {
+            regenIn.value = [...selected].sort((a, b) => a - b).join(",");
+          };
+          for (let i = 0; i < subs.length; i++) {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "regen-chip";
+            chip.textContent = String(i);
+            chip.title = t("regenChipTitle", { i, sec: Math.round(Number(subs[i].duration) || 5) });
+            chip.onclick = (ev) => {
+              ev.stopPropagation();
+              if (selected.has(i)) {
+                selected.delete(i);
+                chip.classList.remove("on");
+              } else {
+                selected.add(i);
+                chip.classList.add("on");
+              }
+              syncInput();
+            };
+            chipWrap.appendChild(chip);
+          }
+          regenRow.appendChild(chipWrap);
           regenRow.appendChild(regenIn);
           const bReg = document.createElement("button");
           bReg.type = "button";
@@ -1691,7 +1782,8 @@ function renderSegments() {
           bReg.textContent = t("btnRegenParts");
           bReg.onclick = (ev) => {
             ev.stopPropagation();
-            regenSubclips(s.id, c.id, regenIn.value).catch((e) => setStatus(e.message));
+            const raw = regenIn.value.trim() || [...selected].join(",");
+            regenSubclips(s.id, c.id, raw).catch((e) => setStatus(e.message));
           };
           regenRow.appendChild(bReg);
           left.appendChild(regenRow);
@@ -3046,19 +3138,14 @@ function wire() {
   };
   $("btnSaveMeta").onclick = async () => {
     if (!state.project) return;
-    const barMode =
-      document.querySelector('input[name="barMode"]:checked')?.value || "waveform";
     state.project = await api(`/api/projects/${state.project.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        world: $("world").value,
-        lyrics: $("lyrics").value,
-        bar_mode: barMode,
-      }),
+      body: JSON.stringify(collectMetaBody()),
     });
     commitHistory("meta");
     setStatus(t("statusMetaSaved"));
+    refreshTasteHints().catch(() => {});
   };
   for (const r of document.querySelectorAll('input[name="barMode"]')) {
     r.addEventListener("change", async () => {
@@ -3067,11 +3154,7 @@ function wire() {
       await api(`/api/projects/${state.project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          world: $("world").value,
-          lyrics: $("lyrics").value,
-          bar_mode: r.value,
-        }),
+        body: JSON.stringify(collectMetaBody({ bar_mode: r.value })),
       });
     });
   }
@@ -3094,6 +3177,7 @@ async function refreshVideoBadge() {
   if (!el) return;
   try {
     const h = await api("/api/health");
+    state.health = h;
     const prov = String(h.video_provider || "mock").toLowerCase();
     let model = h.video_model || h.xai_model || h.fal_model || "";
     let label = "";
@@ -3121,6 +3205,8 @@ async function refreshVideoBadge() {
     el.textContent = label;
     el.title = title;
     el.setAttribute("aria-label", label);
+    // refresh gen button labels if segments already drawn
+    if (state.project) renderSegments();
   } catch (e) {
     el.textContent = "—";
     el.title = String(e.message || e);
