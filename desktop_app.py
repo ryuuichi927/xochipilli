@@ -1,19 +1,13 @@
 """
-Xochipilli desktop shell: local FastAPI + native pywebview (cocoa) only.
+Xochipilli desktop shell: local FastAPI + stock pywebview (cocoa).
 
 No Chrome/Safari auto-launch from Dock.
 Opt-in browser: XOCHIPILLI_SHELL=browser
 
-Paint (Incident B/E): pywebview cocoa attaches WKWebView only inside
-webView_didFinishNavigation_; until then the client area can look empty/white.
-
-Clicks/resize (Incident F/G):
-- F: load_html thrashing broke JS handlers — use single url=http://127.0.0.1:PORT/.
-- G: early setContentView_(WKWebView) fixed white paint but broke hit-testing and
-  live resize even with styleMask resizable. Do NOT make WKWebView the window's
-  contentView. Use plain NSView container + addSubview(WKWebView) (option B).
-
-Do not evaluate_js on full workbench (bridge hang). Do not wrap decidePolicy.
+Incident H (2026-08-04): custom cocoa setContentView / NSView-container monkey-patches
+fixed white paint but left the window non-interactive (no clicks, no resize) on this Mac.
+Use **unpatched** pywebview: create_window(url=...) only. Let cocoa.py didFinish attach
+the WKWebView. Do not thrash load_html. Do not evaluate_js on the full UI.
 """
 
 from __future__ import annotations
@@ -242,166 +236,6 @@ def _activate_cocoa() -> None:
         _log(f"cocoa activate skipped: {e}")
 
 
-# NSWindowStyleMaskResizable (macOS) — stable numeric bit for logging/OR
-_NS_RESIZABLE = 8  # AppKit.NSWindowStyleMaskResizable / NSResizableWindowMask
-
-
-def _patch_cocoa_content_container() -> bool:
-    """Incident G: never set WKWebView as the window contentView directly.
-
-    Preferred path after F: url= only + dark background. Paint used to need an
-    early attach (E), but setContentView_(WKWebView) broke hit-testing and live
-    resize even with styleMask=15. Option B: contentView = plain NSView;
-    WKWebView is a filling subview with autoresize. That keeps titlebar/resize
-    chrome intact and still paints before/without relying solely on didFinish.
-
-    pywebview's didFinish does setContentView_(webview) only when
-    ``not webview.window()``. After our container attach, webview.window() is
-    set, so didFinish skips the destructive swap and still injects the bridge.
-    """
-    try:
-        import webview.platforms.cocoa as cocoa
-        from AppKit import NSView, NSViewHeightSizable, NSViewWidthSizable
-    except Exception as e:
-        _log(f"cocoa patch import failed: {e}")
-        return False
-
-    if getattr(cocoa.BrowserView, "_xochipilli_cv_container", False):
-        return True
-
-    orig_init = cocoa.BrowserView.__init__
-
-    def _init(self, window):  # type: ignore[no-untyped-def]
-        orig_init(self, window)
-        try:
-            wv = self.webview
-            ns_win = self.window
-
-            # Window hygiene (C-class extras without direct WK contentView)
-            try:
-                ns_win.setMovableByWindowBackground_(False)
-            except Exception as e:
-                _log(f"setMovableByWindowBackground: {e}")
-            try:
-                ns_win.setAcceptsMouseMovedEvents_(True)
-            except Exception as e:
-                _log(f"setAcceptsMouseMovedEvents: {e}")
-
-            # B: plain NSView container as contentView; WKWebView as subview only
-            try:
-                if hasattr(ns_win, "contentLayoutRect"):
-                    frame = ns_win.contentLayoutRect()
-                else:
-                    cv0 = ns_win.contentView()
-                    frame = cv0.bounds() if cv0 is not None else wv.frame()
-
-                container = NSView.alloc().initWithFrame_(frame)
-                container.setAutoresizingMask_(
-                    NSViewWidthSizable | NSViewHeightSizable
-                )
-                # Subview fills container in container-local coords (0,0 bounds)
-                wv.setFrame_(container.bounds())
-                wv.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
-                # If webview was already parented somehow, detach first
-                try:
-                    if wv.superview() is not None:
-                        wv.removeFromSuperview()
-                except Exception:
-                    pass
-                container.addSubview_(wv)
-                ns_win.setContentView_(container)
-                # Window may re-layout contentView; re-fill after attach
-                try:
-                    wv.setFrame_(container.bounds())
-                except Exception:
-                    pass
-                ns_win.makeFirstResponder_(wv)
-                self._xochipilli_container = container  # type: ignore[attr-defined]
-                _log(
-                    "cocoa contentView=NSView container + WKWebView subview "
-                    "(no direct setContentView WKWebView)"
-                )
-            except Exception as e:
-                _log(f"container contentView failed: {e}")
-                # Last resort C: contentLayoutRect + direct webview (may break hits)
-                try:
-                    if hasattr(ns_win, "contentLayoutRect"):
-                        wv.setFrame_(ns_win.contentLayoutRect())
-                    wv.setAutoresizingMask_(
-                        NSViewWidthSizable | NSViewHeightSizable
-                    )
-                    ns_win.setContentView_(wv)
-                    ns_win.makeFirstResponder_(wv)
-                    _log("cocoa fallback setContentView_(WKWebView) contentLayoutRect")
-                except Exception as e2:
-                    _log(f"fallback setContentView failed: {e2}")
-
-            # Preserve / restore resizable + log styleMask
-            try:
-                mask = int(ns_win.styleMask())
-                if (mask & _NS_RESIZABLE) == 0:
-                    ns_win.setStyleMask_(mask | _NS_RESIZABLE)
-                    mask = int(ns_win.styleMask())
-                    _log(f"restored NSResizableWindowMask styleMask={mask}")
-                try:
-                    from AppKit import (
-                        NSWindowCloseButton,
-                        NSWindowMiniaturizeButton,
-                        NSWindowZoomButton,
-                    )
-
-                    for btn in (
-                        NSWindowCloseButton,
-                        NSWindowMiniaturizeButton,
-                        NSWindowZoomButton,
-                    ):
-                        b = ns_win.standardWindowButton_(btn)
-                        if b is not None:
-                            b.setHidden_(False)
-                except Exception:
-                    pass
-                _log(
-                    f"window styleMask={mask} resizable="
-                    f"{bool(mask & _NS_RESIZABLE)}"
-                )
-            except Exception as e:
-                _log(f"styleMask check: {e}")
-        except Exception as e:
-            _log(f"cocoa container patch body failed: {e}")
-
-    cocoa.BrowserView.__init__ = _init  # type: ignore[method-assign]
-    cocoa.BrowserView._xochipilli_cv_container = True  # type: ignore[attr-defined]
-    _log("cocoa BrowserView.__init__ patched for NSView container contentView")
-    return True
-
-
-# Back-compat name used by older docs/tests
-def _patch_cocoa_early_content_view() -> bool:
-    return _patch_cocoa_content_container()
-
-
-def _prepare_html(html: str, base: str) -> str:
-    """Fallback helper: <base href> + absolute /static (kept for emergency load_html)."""
-    b = base if base.endswith("/") else base + "/"
-    out = html
-    if "<base " not in out.lower():
-        inject = f'<base href="{b}">'
-        low = out.lower()
-        idx = low.find("<head>")
-        if idx >= 0:
-            out = out[: idx + 6] + inject + out[idx + 6 :]
-        else:
-            out = inject + out
-    out = (
-        out.replace('href="/static/', f'href="{b}static/')
-        .replace("href='/static/", f"href='{b}static/")
-        .replace('src="/static/', f'src="{b}static/')
-        .replace("src='/static/", f"src='{b}static/")
-        .replace('href="/favicon', f'href="{b}favicon')
-    )
-    return out
-
-
 def _run_pywebview(target: str) -> int:
     try:
         import webview
@@ -414,8 +248,8 @@ def _run_pywebview(target: str) -> int:
         )
         return 1
 
-    _patch_cocoa_content_container()
-
+    # Incident H: do NOT monkey-patch cocoa BrowserView / setContentView / containers.
+    # Those patches painted UI but killed clicks + window resize on this host.
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.settings["ALLOW_FILE_URLS"] = True
 
@@ -423,44 +257,41 @@ def _run_pywebview(target: str) -> int:
     storage.mkdir(parents=True, exist_ok=True)
 
     base = target if target.endswith("/") else target + "/"
-    # Primary: real HTTP URL so WKWebView has a normal origin and full app.js runs.
-    # load_html thrashing painted CSS but broke click handlers (Incident F).
-    _log(f"using url= navigation (single) → {base}")
+    _log(f"using stock pywebview url= (no cocoa contentView patch) → {base}")
+
     window_kwargs: dict = {
         "title": "Xochipilli",
         "url": base,
-        "width": 1440,
-        "height": 900,
-        # Smaller than default so edge-drag resize is obvious (Incident G)
-        "min_size": (800, 500),
+        "width": 1280,
+        "height": 800,
+        "min_size": (640, 480),
         "background_color": "#0c0e12",
         "text_select": True,
         "resizable": True,
         "focus": True,
+        "easy_drag": False,
+        "frameless": False,
     }
 
     try:
         window = webview.create_window(**window_kwargs)
     except TypeError:
-        window_kwargs.pop("text_select", None)
-        window_kwargs.pop("focus", None)
+        for k in ("text_select", "focus", "easy_drag", "frameless"):
+            window_kwargs.pop(k, None)
         window = webview.create_window(**window_kwargs)
 
     print("[xochipilli] shell_mode=pywebview", flush=True)
-    _log(f"window created (url) → {base}")
+    _log(f"window created (url stock) → {base}")
 
     state = {"loaded": False}
 
     def _on_shown() -> None:
         _log("event shown")
         _activate_cocoa()
-        # No second navigation here — create_window(url=) already loads once.
 
     def _on_loaded() -> None:
         state["loaded"] = True
-        # Do NOT evaluate_js on the full workbench page — on this host the JS bridge
-        # can block forever after inject (hangs desktop_app). Trust load + early CV.
-        _log("event loaded (no evaluate_js — avoid bridge hang on full UI)")
+        _log("event loaded (stock path — no evaluate_js)")
 
     try:
         window.events.shown += _on_shown
@@ -471,10 +302,10 @@ def _run_pywebview(target: str) -> int:
     def _boot() -> None:
         time.sleep(0.05)
         _activate_cocoa()
-        # Soft retry only if first url= navigation never finished (no thrashing).
-        time.sleep(1.2)
+        # Only retry if first navigation never completed — never thrash.
+        time.sleep(2.0)
         if not state["loaded"]:
-            _log("loaded event still missing — single load_url retry")
+            _log("loaded still missing — one load_url retry")
             try:
                 window.load_url(base)
                 _log(f"boot load_url {base}")
@@ -483,11 +314,12 @@ def _run_pywebview(target: str) -> int:
                 _alert(
                     "ネイティブ窓への URL 読み込みに失敗。\n"
                     f"{e}\n"
-                    "session.log を確認してください。",
+                    "session.log を確認してください。\n"
+                    f"ブラウザ確認: {base}",
                     critical=True,
                 )
         else:
-            _log("nav ok — no reload (single url path)")
+            _log("nav ok — stock single url path")
 
     try:
         webview.start(
