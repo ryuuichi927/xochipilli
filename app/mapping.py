@@ -6,6 +6,15 @@ from typing import Any
 
 from .paths import THEORY
 
+# Strong camera lock used for continuity chaining and optional UI toggle.
+CAMERA_LOCK_TEXT = (
+    "CAMERA LOCK — PHYSICALLY LOCKED STATIC SHOT:\n"
+    "Physically locked static camera on a heavy tripod. "
+    "Zero zoom, zero push-in, zero dolly, zero pan, zero tilt, zero camera movement of any kind. "
+    "Framing, viewpoint, focal length and composition must stay 100% identical to the starting frame. "
+    "Only the subject and environment may animate. Do not change the camera position or angle at all."
+)
+
 
 def load_mapping() -> dict[str, Any]:
     return json.loads((THEORY / "mapping_v0.json").read_text(encoding="utf-8"))
@@ -67,11 +76,27 @@ def compose_video_prompt(
     *,
     chain_from_prev: bool = False,
     user_ref_image: bool = False,
+    camera_lock: bool = False,
 ) -> str:
+    """Build the final prompt sent to the video provider.
+
+    camera_lock / chain_from_prev:
+        When True, a hard locked-camera block is placed at the top so the model
+        is less likely to drift viewpoint across chained clips.
+    """
     c = build_constraints(feat)
-    parts = [user_prompt.strip()]
+    parts: list[str] = []
+
+    # Hard lock first — model pays most attention to the opening instructions.
+    if camera_lock or chain_from_prev:
+        parts.append(CAMERA_LOCK_TEXT)
+
+    if user_prompt.strip():
+        parts.append(user_prompt.strip())
+
     if world.strip():
         parts.append(f"World / continuity: {world.strip()}")
+
     if user_ref_image:
         parts.append(
             "START FROM ATTACHED REFERENCE IMAGE: The provided still is the opening frame / visual anchor. "
@@ -81,17 +106,18 @@ def compose_video_prompt(
         )
     elif chain_from_prev:
         parts.append(
-            "CONTINUITY FROM PREVIOUS SHOT: A still of the last frame of the previous clip "
+            "CONTINUITY FROM PREVIOUS SHOT: A still of the exact last frame of the previous clip "
             "is provided as the starting image. Begin from that frame and evolve into the new action. "
-            "Prefer a natural camera/action continuation, or a brief cinematic transition "
-            "(subtle dissolve, short fade through dark, match-cut) when the scene must change. "
+            "Keep the camera completely locked (see CAMERA LOCK above). "
             "Preserve lighting, palette, and spatial logic unless the user prompt clearly resets the world."
         )
+
     if c["soft_tags"]:
         parts.append(
             "Music-derived visual bias (soft, do not override explicit user intent): "
             + ", ".join(c["soft_tags"])
         )
+
     parts.append(
         f"Clip length about {feat.get('duration_sec', '?')} seconds; cinematic; no subtitles; no watermark."
     )
