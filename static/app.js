@@ -137,6 +137,10 @@ function applyI18nStatic() {
     if (key) el.setAttribute("title", t(key));
   });
 
+  try {
+    updateWorldToggleMeta();
+  } catch (_) {}
+
   document.querySelectorAll(".lang-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.lang === state.lang);
   });
@@ -210,6 +214,80 @@ function fillProjectMetaFields(p) {
   if ($("projNegative")) $("projNegative").value = p.negative_prompt || "";
   if ($("applyTaste")) $("applyTaste").checked = p.apply_taste !== false;
   if ($("lyrics")) $("lyrics").value = p.lyrics || "";
+  updateWorldToggleMeta();
+}
+
+const WORLD_OPEN_KEY = "mfw.worldOpen";
+
+function isWorldPanelOpen() {
+  const panel = $("worldPanel");
+  return !!(panel && !panel.classList.contains("is-collapsed"));
+}
+
+function setWorldPanelOpen(open, { persist = true } = {}) {
+  const panel = $("worldPanel");
+  const body = $("worldBody");
+  const btn = $("btnWorldToggle");
+  if (!panel || !body || !btn) return;
+  const on = !!open;
+  panel.classList.toggle("is-collapsed", !on);
+  body.hidden = !on;
+  btn.setAttribute("aria-expanded", on ? "true" : "false");
+  if (persist) {
+    try {
+      localStorage.setItem(WORLD_OPEN_KEY, on ? "1" : "0");
+    } catch (_) {}
+  }
+  updateWorldToggleMeta();
+}
+
+function updateWorldToggleMeta() {
+  const meta = $("worldToggleMeta");
+  const btn = $("btnWorldToggle");
+  if (btn) {
+    try {
+      btn.title = t("worldToggleTitle");
+    } catch (_) {}
+  }
+  if (!meta) return;
+  if (isWorldPanelOpen()) {
+    meta.hidden = true;
+    meta.textContent = "";
+    return;
+  }
+  const bits = [];
+  const w = ($("world")?.value || "").trim();
+  const s = ($("projStyle")?.value || "").trim();
+  const n = ($("projNegative")?.value || "").trim();
+  if (w) bits.push(w.slice(0, 24));
+  else if (s) bits.push(s.slice(0, 24));
+  else if (n) bits.push(n.slice(0, 24));
+  if (bits.length) {
+    meta.hidden = false;
+    meta.textContent = bits[0] + (bits[0].length >= 24 ? "…" : "");
+  } else {
+    // still show a quiet "set" if taste-only? skip — empty is fine
+    meta.hidden = true;
+    meta.textContent = "";
+  }
+}
+
+function initWorldPanel() {
+  const btn = $("btnWorldToggle");
+  if (!btn) return;
+  let preferOpen = false;
+  try {
+    preferOpen = localStorage.getItem(WORLD_OPEN_KEY) === "1";
+  } catch (_) {}
+  // Default collapsed (preview space). Only reopen if user left it open.
+  setWorldPanelOpen(preferOpen, { persist: false });
+  btn.onclick = () => setWorldPanelOpen(!isWorldPanelOpen());
+  for (const id of ["world", "projStyle", "projNegative"]) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener("input", () => updateWorldToggleMeta());
+  }
+  updateWorldToggleMeta();
 }
 
 function collectMetaBody(extra) {
@@ -3205,6 +3283,8 @@ function wire() {
   document.querySelectorAll(".lang-btn").forEach((btn) => {
     btn.onclick = () => setLang(btn.dataset.lang);
   });
+
+  initWorldPanel();
 
   window.addEventListener("resize", () => renderWave());
   window.addEventListener("keydown", (e) => {
