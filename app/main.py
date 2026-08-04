@@ -605,6 +605,7 @@ async def _api_generate_inner(pid: str, sid: str):
                         start_image = None
                         chain = False
 
+    # Explicit user toggle only — never force-lock just because we chained
     cam_lock = bool(seg.get("camera_lock"))
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
     tags = tags + list(seg.get("emotion_keywords") or [])
@@ -637,13 +638,13 @@ async def _api_generate_inner(pid: str, sid: str):
 
     for i in range(n_parts):
         part_dur = unit if i < n_parts - 1 else max(1.0, dur - unit * (n_parts - 1))
-        # Keep last part at least ~2s if possible by borrowing from previous split logic
+        # Keep last part at least ~2s if possible
         if n_parts > 1 and i == n_parts - 1 and part_dur < 2.0 and dur >= 2.0:
             part_dur = max(2.0, dur - unit * (n_parts - 1))
 
         chain_here = bool(cur_start) and (chain or user_ref or i > 0)
-        # Force camera lock across internal chain for continuity
-        lock_here = bool(cam_lock or chain_here)
+        # HARD LOCK only when user explicitly toggled camera_lock
+        lock_here = bool(cam_lock)
 
         composed = compose_video_prompt(
             seg["prompt"],
@@ -657,15 +658,30 @@ async def _api_generate_inner(pid: str, sid: str):
             composed_first = composed
 
         part_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}.mp4"
-        meta = await generate_clip(
-            out_path=part_path,
-            duration=part_dur,
-            user_prompt=seg["prompt"],
-            composed_prompt=composed,
-            tags=tags,
-            audio_segment=None,  # mux only on final if needed
-            start_image=cur_start,
-        )
+        try:
+            meta = await generate_clip(
+                out_path=part_path,
+                duration=part_dur,
+                user_prompt=seg["prompt"],
+                composed_prompt=composed,
+                tags=tags,
+                audio_segment=None,  # mux only on final if needed
+                start_image=cur_start,
+            )
+        except Exception as e:
+            # Honest failure: do NOT invent a mock take or partial stitch
+            raise HTTPException(
+                502,
+                f"映像生成に失敗しました (part {i + 1}/{n_parts}): {e}",
+            ) from e
+
+        if meta.get("is_mock") and (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip() not in {
+            "mock",
+            "",
+        }:
+            # Should never happen after honest-failure fix, but guard anyway
+            raise HTTPException(502, f"unexpected mock under real provider (part {i + 1}/{n_parts})")
+
         last_meta = meta
         part_paths.append(part_path)
         subclips.append(
@@ -677,10 +693,11 @@ async def _api_generate_inner(pid: str, sid: str):
                 "model": meta.get("model"),
                 "chained": bool(meta.get("chained") or chain_here),
                 "chain_frame": Path(cur_start).name if cur_start else None,
+                "is_mock": bool(meta.get("is_mock")),
             }
         )
 
-        # Next start = last frame of this part
+        # Next start = near-end frame of this part
         if i < n_parts - 1 and part_path.is_file():
             frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-last.jpg"
             try:
@@ -694,7 +711,10 @@ async def _api_generate_inner(pid: str, sid: str):
         if part_paths[0].resolve() != out.resolve():
             out.write_bytes(part_paths[0].read_bytes())
     else:
-        concat_video_files(part_paths, out)
+        try:
+            concat_video_files(part_paths, out)
+        except Exception as e:
+            raise HTTPException(500, f"クリップ連結に失敗しました: {e}") from e
 
     # Optional: mux segment audio onto final (best-effort)
     if audio_seg and Path(audio_seg).exists() and out.is_file():
@@ -729,8 +749,6 @@ async def _api_generate_inner(pid: str, sid: str):
         "provider": last_meta.get("provider"),
         "composed_prompt": composed_first,
         "note": last_meta.get("note"),
-        "fal_error": last_meta.get("fal_error"),
-        "xai_error": last_meta.get("xai_error"),
         "created_at": storage._now(),
         "label": f"take {take_n}",
         "auth_source": last_meta.get("auth_source"),
@@ -741,11 +759,12 @@ async def _api_generate_inner(pid: str, sid: str):
         "chain_frame": start_image.name if start_image else None,
         "user_ref_image": bool(user_ref),
         "ref_image": seg.get("ref_image") if user_ref else None,
-        "camera_lock": bool(cam_lock or chain or n_parts > 1),
+        "camera_lock": bool(cam_lock),
         "clip_unit_seconds": unit,
         "subclip_count": n_parts,
         "subclips": subclips,
         "duration_requested": dur,
+        "is_mock": bool(last_meta.get("is_mock")),
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id
@@ -800,7 +819,6 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
     for field in ("file", "chain_frame"):
         fname = hit.get(field)
         if fname and _unused(fname, field if field == "file" else "chain_frame"):
-            # chain_frame may only live on this clip; also check file field for safety
             still = any(
                 (c.get("file") == fname or c.get("chain_frame") == fname)
                 for s2 in p.get("segments") or []
@@ -833,7 +851,6 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
         else:
             seg["active_clip_id"] = None
             seg["video"] = None
-            # no takes left on this segment → drop segment audio sidecar
             audio_side = clips_dir / f"{sid}-audio.wav"
             try:
                 if audio_side.is_file():
