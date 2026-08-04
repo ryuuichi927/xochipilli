@@ -15,6 +15,18 @@ CAMERA_LOCK_TEXT = (
     "Only the subject and environment may animate. Do not change the camera position or angle at all."
 )
 
+# Soft tags that fight a locked camera (filtered when lock/chain is on).
+_CAMERA_TAG_RE = re.compile(
+    r"camera|pan|tilt|zoom|dolly|push[- ]?in|orbit|tracking shot|long takes",
+    re.IGNORECASE,
+)
+
+DEFAULT_NEGATIVE = (
+    "no camera movement, no zoom, no pan, no tilt, no dolly, no push-in, "
+    "no subtitles, no watermark, no disney style, no generic 3d cgi look, "
+    "no photorealistic faces unless requested"
+)
+
 
 def load_mapping() -> dict[str, Any]:
     return json.loads((THEORY / "mapping_v0.json").read_text(encoding="utf-8"))
@@ -69,6 +81,17 @@ def build_constraints(feat: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _filter_soft_tags(tags: list[str], *, lock_camera: bool) -> list[str]:
+    if not lock_camera:
+        return list(tags)
+    out: list[str] = []
+    for t in tags:
+        if _CAMERA_TAG_RE.search(t or ""):
+            continue
+        out.append(t)
+    return out
+
+
 def compose_video_prompt(
     user_prompt: str,
     feat: dict[str, Any],
@@ -77,19 +100,32 @@ def compose_video_prompt(
     chain_from_prev: bool = False,
     user_ref_image: bool = False,
     camera_lock: bool = False,
+    style: str = "",
+    negative_prompt: str = "",
 ) -> str:
     """Build the final prompt sent to the video provider.
 
     camera_lock / chain_from_prev:
-        When True, a hard locked-camera block is placed at the top so the model
-        is less likely to drift viewpoint across chained clips.
+        When True, a hard locked-camera block is placed at the top and
+        camera-implying soft_tags are stripped.
+    style:
+        Project-level visual style (hand-drawn look, palette, medium, etc.).
+    negative_prompt:
+        Things to avoid; merged with a small default when locking camera.
     """
+    lock = bool(camera_lock or chain_from_prev)
     c = build_constraints(feat)
+    soft_tags = _filter_soft_tags(list(c.get("soft_tags") or []), lock_camera=lock)
     parts: list[str] = []
 
     # Hard lock first — model pays most attention to the opening instructions.
-    if camera_lock or chain_from_prev:
+    if lock:
         parts.append(CAMERA_LOCK_TEXT)
+
+    if style.strip():
+        parts.append(
+            "STYLE LOCK (must preserve across the whole clip):\n" + style.strip()
+        )
 
     if user_prompt.strip():
         parts.append(user_prompt.strip())
@@ -112,11 +148,21 @@ def compose_video_prompt(
             "Preserve lighting, palette, and spatial logic unless the user prompt clearly resets the world."
         )
 
-    if c["soft_tags"]:
+    if soft_tags:
         parts.append(
-            "Music-derived visual bias (soft, do not override explicit user intent): "
-            + ", ".join(c["soft_tags"])
+            "Music-derived visual bias (soft, do not override explicit user intent or STYLE LOCK): "
+            + ", ".join(soft_tags)
         )
+
+    neg = (negative_prompt or "").strip()
+    if lock:
+        # Always reinforce anti-camera + common style failures under lock.
+        if neg:
+            neg = neg + ", " + DEFAULT_NEGATIVE
+        else:
+            neg = DEFAULT_NEGATIVE
+    if neg:
+        parts.append("AVOID / NEGATIVE: " + neg)
 
     parts.append(
         f"Clip length about {feat.get('duration_sec', '?')} seconds; cinematic; no subtitles; no watermark."

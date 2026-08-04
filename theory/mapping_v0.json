@@ -5,11 +5,11 @@
   "soft_constraints": [
     {
       "when": "tempo_bpm >= 140",
-      "prompt_tags": ["fast cutting", "swift camera motion", "high energy pacing"]
+      "prompt_tags": ["high energy subject motion", "busy subject action", "high energy pacing"]
     },
     {
       "when": "tempo_bpm < 90",
-      "prompt_tags": ["slow camera", "long takes", "calm pacing"]
+      "prompt_tags": ["calm subject motion", "gentle pacing", "sparse action"]
     },
     {
       "when": "spectral_centroid_mean_hz >= 2500",
