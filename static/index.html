@@ -6,14 +6,13 @@
   <title>ショチピリ</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
   <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/style.css?v=craft2" />
-  <link rel="stylesheet" href="/static/craft_ui.css?v=craft2" />
+  <link rel="stylesheet" href="/static/style.css?v=craft3" />
+  <link rel="stylesheet" href="/static/craft_ui.css?v=craft3" />
 </head>
 <body>
   <header class="top">
     <div class="brand">
       <img class="brand-mark" src="/static/brand/icon-casual-64.png" width="32" height="32" alt="" />
-      <!-- Proper Nahuatl spelling — same in ja/en/zh; font locked separately -->
       <strong class="brand-title" id="brandTitle" translate="no">Xochipilli</strong>
       <span class="badge" id="videoModelBadge" title="">…</span>
     </div>
@@ -29,7 +28,6 @@
   </header>
 
   <main class="layout layout-music-first">
-    <!-- Music bar: full width, primary work surface -->
     <section class="timeline-stage panel">
       <div class="panel-h row">
         <span data-i18n="editBar">タイムライン</span>
@@ -152,7 +150,6 @@
     </div>
   </aside>
 
-  <!-- Generate wait: floating flower only — loop unfold until done, then glow+scatter -->
   <div id="genLoader" class="gen-loader hidden" hidden aria-hidden="true" aria-live="polite">
     <div class="flower-load" id="flowerLoad" role="status" aria-label="generating">
       <div class="flower-stage stage-1">
@@ -168,8 +165,9 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=craft2"></script>
-  <script src="/static/app.js?v=craft2"></script>
-  <script src="/static/craft_ui.js?v=craft2"></script>
+  <script src="/static/lang_boot.js?v=craft3"></script>
+  <script src="/static/i18n.js?v=craft3"></script>
+  <script src="/static/app.js?v=craft3"></script>
+  <script src="/static/craft_ui.js?v=craft3"></script>
 </body>
 </html>
