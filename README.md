@@ -92,4 +92,5 @@ Clips missing from JSON are orphans (old takes) and may be GC’d.
 This repo is intended **private** by default. Do not commit `.env`, `data/projects/`, or personal media (see `.gitignore`).
 
 ## License
-All rights reserved by the author unless a `LICENSE` file is added later.
+Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**  
+See [LICENSE](./LICENSE) (Japanese / English / 中文).

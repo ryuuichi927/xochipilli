@@ -92,4 +92,4 @@ JSON に無い clips は孤児（古いテイク）なので、必要なら GC �
 既定は **Private** リポジトリ想定。`.env`・`data/projects/`・個人メディアはコミットしない（`.gitignore` 参照）。
 
 ## ライセンス
-`LICENSE` を後から足すまで、著作権は作者に帰属します。
+著作権は作者に帰属します（All rights reserved）。詳細は [LICENSE](./LICENSE)（日本語 / English / 中文）。

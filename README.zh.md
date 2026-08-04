@@ -1,4 +1,4 @@
-# Xochipilli（肖奇皮利）
+# Xochipilli（索奇皮利）
 
 [English](README.md) | [日本語](README.ja.md) | **中文**
 
@@ -92,4 +92,4 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 默认按 **Private** 仓库使用。不要提交 `.env`、`data/projects/` 或个人媒体（见 `.gitignore`）。
 
 ## 许可
-在添加 `LICENSE` 之前，版权归作者所有。
+著作权归作者所有（All rights reserved）。详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。
