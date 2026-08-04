@@ -50,8 +50,13 @@ window created → http://127.0.0.1:8787
 ## Troubleshooting
 - **Nothing happens:** check the logs above. Try `xattr -cr /Applications/Xochipilli.app` then click again
 - **Dock bounce then die:** confirm MacOS launcher still `exec`s run.sh (not nohup+exit)
-- **White empty window (title only):** WKWebView failed to paint URL. Fixed path uses dark bootstrap + `load_html(..., base_uri=http://127.0.0.1:8787/)`. See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md). Expect `load_html ok` in session.log
+- **White empty window (title only):**
+  1. Open http://127.0.0.1:8787/ in a normal browser — if dark UI shows, the **server is fine**
+  2. `session.log` must contain `cocoa early setContentView_(WKWebView)` and `boot load_html base_uri=`
+  3. If missing, update `desktop_app.py` and relaunch Dock (do **not** re-enable Chrome auto-launch)
+  4. Details: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E
 - **Traceback / icon argument:** `desktop_app.py` is patched for pywebview builds without `icon=`
 - **Port clash:** set `PORT=` in `.env`, or free 8787
 - **No pywebview:** `.venv/bin/pip install pywebview`
 - **Ben's Tool PYTHONPATH pollution:** run.sh unsets it; desktop_app also strips `/.bentool/` from `sys.path`
+- **Browser only when you want it:** `XOCHIPILLI_SHELL=browser` (never default from Dock)
