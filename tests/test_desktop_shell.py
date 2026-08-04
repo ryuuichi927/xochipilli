@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop shell: stock pywebview, no cocoa contentView patches, no Chrome."""
+"""Desktop shell contracts: stock webview + in-bundle Mach-O launcher."""
 
 from __future__ import annotations
 
@@ -31,45 +31,58 @@ def main() -> int:
     except SyntaxError as e:
         bad(f"syntax: {e}")
 
-    for n, lab in [
-        ("shell_mode=pywebview", "pywebview mode"),
-        ("stock pywebview", "stock path log"),
-        ("_kill_legacy_chrome_app", "kill legacy chrome"),
-        ("XOCHIPILLI_SHELL", "opt-in browser"),
-        ('or "webview"', "default webview"),
-        ("resizable\": True", "resizable"),
-        ("\"url\": base", "url= create"),
-    ]:
-        (ok if n in desk else bad)(lab)
+    for n in (
+        "stock pywebview",
+        "shell_mode=pywebview",
+        '"url": base',
+        "resizable\": True",
+        "_log_bundle_identity",
+        "_kill_legacy_chrome_app",
+        "XOCHIPILLI_SHELL",
+    ):
+        (ok if n in desk else bad)(f"has {n}")
 
-    # Must NOT monkey-patch contentView
     for n in (
         "setContentView_",
         "_patch_cocoa_content_container",
         "_patch_cocoa_early_content_view",
         "using load_html path",
         "def _open_chromium_app",
-        "shell_mode=chromium-app",
         "--app=",
+        "evaluate_js(",
     ):
         (ok if n not in desk else bad)(f"lacks {n}")
 
-    if "evaluate_js(" in desk:
-        bad("evaluate_js( still present")
+    launcher = ROOT / "Xochipilli.app/Contents/MacOS/Xochipilli"
+    if not launcher.is_file():
+        bad("repo launcher missing")
     else:
-        ok("no evaluate_js(")
+        r = subprocess.run(["file", str(launcher)], capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        if "Mach-O" in out:
+            ok("repo launcher is Mach-O")
+        else:
+            bad(f"repo launcher not Mach-O: {out.strip()}")
 
-    main_body = desk.split("def main")[-1]
-    (ok if "_run_pywebview(target)" in main_body else bad)("main→pywebview")
+    apps = Path("/Applications/Xochipilli.app/Contents/MacOS/Xochipilli")
+    if apps.is_file():
+        r = subprocess.run(["file", str(apps)], capture_output=True, text=True)
+        (ok if "Mach-O" in r.stdout else bad)("Apps launcher Mach-O")
+    else:
+        bad("Apps launcher missing")
+
+    plist = (ROOT / "Xochipilli.app/Contents/Info.plist").read_text(encoding="utf-8")
+    (ok if "NSLocalNetworkUsageDescription" in plist else bad)("plist local network usage")
+    (ok if "NSAllowsLocalNetworking" in plist else bad)("plist allows local networking")
+
+    csrc = ROOT / "native/xochipilli_launcher.c"
+    (ok if csrc.is_file() and "Py_Initialize" in csrc.read_text() else bad)("native launcher source")
 
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/api/health", timeout=1.5) as r:
             (ok if b"Xochipilli" in r.read() else bad)("live health")
     except Exception as e:
         ok(f"live skip {e}")
-
-    pc = subprocess.run(["pgrep", "-f", "chrome-app-profile"], capture_output=True)
-    (ok if pc.returncode != 0 else bad)("no chrome-app-profile")
 
     print("----")
     if fails:

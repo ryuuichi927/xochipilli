@@ -236,6 +236,24 @@ def _activate_cocoa() -> None:
         _log(f"cocoa activate skipped: {e}")
 
 
+def _log_bundle_identity() -> None:
+    """Log whether we still own Xochipilli.app (needed for WKWebView local HTTP)."""
+    try:
+        from Foundation import NSBundle
+
+        b = NSBundle.mainBundle()
+        path = b.bundlePath() if b else None
+        bid = b.bundleIdentifier() if b else None
+        _log(f"NSBundle path={path!r} id={bid!r}")
+        if path and "Xochipilli.app" not in str(path):
+            _log(
+                "WARN: mainBundle is not Xochipilli.app — WKWebView may block "
+                "localhost (launch via Dock .app in-bundle launcher, not bare python)"
+            )
+    except Exception as e:
+        _log(f"NSBundle probe skipped: {e}")
+
+
 def _run_pywebview(target: str) -> int:
     try:
         import webview
@@ -366,6 +384,7 @@ def main() -> int:
 
     _log(f"desktop_app start pid={os.getpid()} py={sys.executable}")
     _log(f"sys.path[0:4]={sys.path[:4]}")
+    _log_bundle_identity()
 
     _kill_legacy_chrome_app()
 
