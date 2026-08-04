@@ -4,6 +4,7 @@ Xochipilli desktop shell (B): local uvicorn + native window (pywebview).
 Usage:
   .venv/bin/python desktop_app.py
   ./RUN_DESKTOP.sh
+  Dock → /Applications/Xochipilli.app
 """
 
 from __future__ import annotations
@@ -15,9 +16,24 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+# Strip agent/Ben's Tool pollution before any third-party import
+os.environ.pop("PYTHONPATH", None)
+os.environ.pop("PYTHONHOME", None)
+_clean_path: list[str] = []
+for _p in sys.path:
+    if not _p:
+        _clean_path.append(_p)
+        continue
+    low = _p.replace("\\", "/").lower()
+    if "/.bentool/" in low or "bentool-agent" in low:
+        continue
+    _clean_path.append(_p)
+sys.path[:] = _clean_path
 
 ROOT = Path(__file__).resolve().parent
 HOST = "127.0.0.1"
@@ -31,7 +47,6 @@ def _alert(message: str, *, critical: bool = False) -> None:
     try:
         style = "critical" if critical else "informational"
         msg = str(message)[:500]
-        # argv avoids quote escaping bugs in Japanese messages
         script = (
             "on run argv\n"
             f'  display alert "Xochipilli" message (item 1 of argv) as {style} giving up after 12\n'
@@ -58,7 +73,6 @@ def _health_payload() -> dict | None:
         return None
 
 
-
 def _load_dotenv() -> None:
     env_path = ROOT / ".env"
     if not env_path.is_file():
@@ -68,7 +82,6 @@ def _load_dotenv() -> None:
 
         load_dotenv(env_path)
     except Exception:
-        # minimal parse
         for line in env_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -87,7 +100,6 @@ def _health_ok() -> bool:
     h = _health_payload()
     if not h or not h.get("ok"):
         return False
-    # Prefer our own product on this port
     prod = str(h.get("product") or "")
     return (not prod) or prod == "Xochipilli"
 
@@ -99,13 +111,11 @@ def _start_server() -> subprocess.Popen | None:
         print(f"[xochipilli] reuse server at {URL} (product={h.get('product')})")
         return None
     if _port_open(PORT):
-        # something else on port — wait a bit for health (slow boot)
         for _ in range(24):
             if _health_ok():
                 print(f"[xochipilli] reuse server at {URL} (became healthy)")
                 return None
             time.sleep(0.25)
-        # Port occupied by a non-Xochipilli process or a broken half-boot
         msg = (
             f"ポート {PORT} は使われているが、Xochipilli の /api/health が応答しない。"
             " 別アプリが 8787 を占有しているか、前回のサーバが壊れている。"
@@ -113,11 +123,11 @@ def _start_server() -> subprocess.Popen | None:
         )
         print(f"[xochipilli] WARN: {msg}", file=sys.stderr)
         _alert(msg, critical=True)
-        # Still try to start — uvicorn will fail fast if bind fails; user saw the alert.
 
     py = str(VENV_PY if VENV_PY.is_file() else sys.executable)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
     env.setdefault("VIDEO_PROVIDER", env.get("VIDEO_PROVIDER", "mock"))
     cmd = [
         py,
@@ -190,27 +200,44 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
             proc.kill()
 
 
+def _activate_cocoa() -> None:
+    """Bring this process to the foreground on macOS (Dock/orphan launches)."""
+    try:
+        from AppKit import NSApplication, NSApp, NSApplicationActivationPolicyRegular
+
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+        app.activateIgnoringOtherApps_(True)
+        print("[xochipilli] cocoa activateIgnoringOtherApps")
+    except Exception as e:
+        print(f"[xochipilli] cocoa activate skipped: {e}")
+
+
 def main() -> int:
     os.chdir(ROOT)
     _load_dotenv()
+    print(f"[xochipilli] desktop_app start pid={os.getpid()} py={sys.executable}")
+    print(f"[xochipilli] sys.path[0:4]={sys.path[:4]}")
 
     try:
         import webview
     except ImportError:
-        print(
-            "pywebview missing. Install:\n"
-            f"  {VENV_PY} -m pip install pywebview\n"
-            "or: pip install -r requirements.txt",
-            file=sys.stderr,
+        msg = (
+            "pywebview が入っていない。\n"
+            f"{VENV_PY} -m pip install pywebview\n"
+            "または requirements.txt を入れてから再度開いてください。"
         )
+        print(msg, file=sys.stderr)
+        _alert(msg, critical=True)
         return 1
 
     server = _start_server()
     atexit.register(_stop_server, server)
 
     if not _health_ok():
-        # Window may still open to show error page; user already got an alert if bind failed.
         print("[xochipilli] continuing to open window without healthy API", file=sys.stderr)
+
+    _activate_cocoa()
 
     window_kwargs = {
         "title": "Xochipilli",
@@ -223,17 +250,25 @@ def main() -> int:
     }
 
     try:
-        webview.create_window(**window_kwargs)
+        window = webview.create_window(**window_kwargs)
     except TypeError:
-        # older pywebview without text_select etc.
         window_kwargs.pop("text_select", None)
-        webview.create_window(**window_kwargs)
+        window = webview.create_window(**window_kwargs)
+
+    print(f"[xochipilli] window created → {URL}")
 
     # private_mode=False keeps localStorage (lang, play rate)
     try:
         webview.start(private_mode=False)
     except TypeError:
         webview.start()
+    except Exception:
+        traceback.print_exc()
+        _alert("ウィンドウの表示に失敗した。session.log を確認してください。", critical=True)
+        _stop_server(server)
+        return 1
+
+    print("[xochipilli] webview.start returned (window closed)")
     _stop_server(server)
     return 0
 
