@@ -4,12 +4,15 @@ Xochipilli desktop shell: local FastAPI + native pywebview (cocoa) only.
 No Chrome/Safari auto-launch from Dock.
 Opt-in browser: XOCHIPILLI_SHELL=browser
 
-White-screen root cause (2026-08-04 Incident B/E):
-  pywebview cocoa attaches WKWebView as NSWindow contentView only inside
-  webView_didFinishNavigation_. Until then the client area is empty/white.
-  Fix: monkey-patch BrowserView.__init__ to setContentView_ + autoresize immediately.
-  Prefer load_html(index, base_uri=http://127.0.0.1:PORT/) so first paint is local HTML
-  with a correct http origin for /static and /api.
+Paint (Incident B/E): pywebview cocoa attaches WKWebView as contentView only inside
+webView_didFinishNavigation_. Until then the client area is empty/white.
+Fix: monkey-patch BrowserView.__init__ → early setContentView_ + autoresize +
+contentLayoutRect frame; keep NSResizableWindowMask.
+
+Clicks/resize (Incident F): load_html thrashing (create_window html + shown + boot)
+paints CSS but races JS bootstrap / origin so handlers never bind; window may lose
+usable resize. Prefer single url=http://127.0.0.1:PORT/ navigation (real HTTP origin).
+Do not evaluate_js on full workbench (bridge hang). Do not wrap WKNavigation blocks.
 """
 
 from __future__ import annotations
@@ -238,8 +241,15 @@ def _activate_cocoa() -> None:
         _log(f"cocoa activate skipped: {e}")
 
 
+# NSWindowStyleMaskResizable (macOS) — stable numeric bit for logging/OR
+_NS_RESIZABLE = 8  # AppKit.NSWindowStyleMaskResizable / NSResizableWindowMask
+
+
 def _patch_cocoa_early_content_view() -> bool:
-    """Attach WKWebView as contentView immediately (do not wait for didFinish)."""
+    """Attach WKWebView as contentView immediately (do not wait for didFinish).
+
+    Also: frame = content layout rect, autoresize, ensure resizable styleMask.
+    """
     try:
         import webview.platforms.cocoa as cocoa
         from AppKit import NSViewHeightSizable, NSViewWidthSizable
@@ -256,17 +266,60 @@ def _patch_cocoa_early_content_view() -> bool:
         orig_init(self, window)
         try:
             wv = self.webview
+            ns_win = self.window
+            # Match content layout (titlebar-safe), not full window frame
+            try:
+                if hasattr(ns_win, "contentLayoutRect"):
+                    clr = ns_win.contentLayoutRect()
+                    wv.setFrame_(clr)
+                else:
+                    cv = ns_win.contentView()
+                    if cv is not None:
+                        wv.setFrame_(cv.bounds())
+            except Exception as e:
+                _log(f"content frame: {e}")
             try:
                 wv.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
             except Exception as e:
                 _log(f"autoresize mask: {e}")
             # Always set as content view up front — fixes pure-white empty client area
             try:
-                self.window.setContentView_(wv)
-                self.window.makeFirstResponder_(wv)
+                ns_win.setContentView_(wv)
+                ns_win.makeFirstResponder_(wv)
                 _log("cocoa early setContentView_(WKWebView)")
             except Exception as e:
                 _log(f"early setContentView failed: {e}")
+            # Preserve / restore resizable + log styleMask (Incident F)
+            try:
+                mask = int(ns_win.styleMask())
+                if (mask & _NS_RESIZABLE) == 0:
+                    ns_win.setStyleMask_(mask | _NS_RESIZABLE)
+                    mask = int(ns_win.styleMask())
+                    _log(f"restored NSResizableWindowMask styleMask={mask}")
+                # Keep standard traffic lights visible (non-frameless)
+                try:
+                    from AppKit import (
+                        NSWindowCloseButton,
+                        NSWindowMiniaturizeButton,
+                        NSWindowZoomButton,
+                    )
+
+                    for btn in (
+                        NSWindowCloseButton,
+                        NSWindowMiniaturizeButton,
+                        NSWindowZoomButton,
+                    ):
+                        b = ns_win.standardWindowButton_(btn)
+                        if b is not None:
+                            b.setHidden_(False)
+                except Exception:
+                    pass
+                _log(
+                    f"window styleMask={mask} resizable="
+                    f"{bool(mask & _NS_RESIZABLE)}"
+                )
+            except Exception as e:
+                _log(f"styleMask check: {e}")
         except Exception as e:
             _log(f"cocoa early patch body failed: {e}")
 
@@ -276,19 +329,8 @@ def _patch_cocoa_early_content_view() -> bool:
     return True
 
 
-def _fetch_index_html() -> str | None:
-    try:
-        with urllib.request.urlopen(f"{URL}/", timeout=3.0) as r:
-            if r.status != 200:
-                return None
-            return r.read().decode("utf-8", "replace")
-    except Exception as e:
-        _log(f"fetch index failed: {e}")
-        return None
-
-
 def _prepare_html(html: str, base: str) -> str:
-    """Ensure <base href> and absolute /static so first paint cannot miss CSS."""
+    """Fallback helper: <base href> + absolute /static (kept for emergency load_html)."""
     b = base if base.endswith("/") else base + "/"
     out = html
     if "<base " not in out.lower():
@@ -299,7 +341,6 @@ def _prepare_html(html: str, base: str) -> str:
             out = out[: idx + 6] + inject + out[idx + 6 :]
         else:
             out = inject + out
-    # absolute static (belt + suspenders if base ignored)
     out = (
         out.replace('href="/static/', f'href="{b}static/')
         .replace("href='/static/", f"href='{b}static/")
@@ -308,27 +349,6 @@ def _prepare_html(html: str, base: str) -> str:
         .replace('href="/favicon', f'href="{b}favicon')
     )
     return out
-
-
-_ERROR_HTML = """<!DOCTYPE html>
-<html lang="ja"><head><meta charset="utf-8"/>
-<style>
- html,body{margin:0;height:100%;background:#0c0e12;color:#e8d48b;
-  font:15px/1.45 -apple-system,system-ui,sans-serif;
-  display:flex;align-items:center;justify-content:center}
- .box{max-width:28rem;padding:1.5rem;text-align:center}
- .err{color:#f0a8a8;margin-top:1rem;font-size:13px;white-space:pre-wrap;text-align:left}
- a{color:#c9a227}
-</style></head><body><div class="box">
-<strong>Xochipilli</strong>
-<p>ネイティブ窓の表示に失敗しました。</p>
-<div class="err">__ERR__</div>
-<p style="margin-top:1rem;font-size:13px;opacity:.8">
-ログ: ~/Library/Logs/Xochipilli/session.log<br/>
-ブラウザ確認: <a href="__URL__">__URL__</a>
-（自動では Chrome を開きません）
-</p></div></body></html>
-"""
 
 
 def _run_pywebview(target: str) -> int:
@@ -352,35 +372,20 @@ def _run_pywebview(target: str) -> int:
     storage.mkdir(parents=True, exist_ok=True)
 
     base = target if target.endswith("/") else target + "/"
-    html_raw = _fetch_index_html()
-    html = _prepare_html(html_raw, base) if html_raw else None
-
-    if html:
-        _log(f"using load_html path bytes={len(html)} base={base}")
-        window_kwargs: dict = {
-            "title": "Xochipilli",
-            "html": html,
-            "width": 1440,
-            "height": 900,
-            "min_size": (960, 640),
-            "background_color": "#0c0e12",
-            "text_select": True,
-            "resizable": True,
-            "focus": True,
-        }
-    else:
-        _log("index fetch failed — falling back to url=")
-        window_kwargs = {
-            "title": "Xochipilli",
-            "url": base,
-            "width": 1440,
-            "height": 900,
-            "min_size": (960, 640),
-            "background_color": "#0c0e12",
-            "text_select": True,
-            "resizable": True,
-            "focus": True,
-        }
+    # Primary: real HTTP URL so WKWebView has a normal origin and full app.js runs.
+    # load_html thrashing painted CSS but broke click handlers (Incident F).
+    _log(f"using url= navigation (single) → {base}")
+    window_kwargs: dict = {
+        "title": "Xochipilli",
+        "url": base,
+        "width": 1440,
+        "height": 900,
+        "min_size": (960, 640),
+        "background_color": "#0c0e12",
+        "text_select": True,
+        "resizable": True,
+        "focus": True,
+    }
 
     try:
         window = webview.create_window(**window_kwargs)
@@ -390,25 +395,14 @@ def _run_pywebview(target: str) -> int:
         window = webview.create_window(**window_kwargs)
 
     print("[xochipilli] shell_mode=pywebview", flush=True)
-    _log(f"window created ({'html' if html else 'url'}) → {base}")
+    _log(f"window created (url) → {base}")
 
     state = {"loaded": False}
 
     def _on_shown() -> None:
         _log("event shown")
         _activate_cocoa()
-        if html:
-            try:
-                window.load_html(html, base_uri=base)
-                _log(f"shown load_html base_uri={base}")
-            except TypeError:
-                try:
-                    window.load_html(html)
-                    _log("shown load_html (no base_uri kw)")
-                except Exception as e:
-                    _log(f"shown load_html failed: {e}")
-            except Exception as e:
-                _log(f"shown load_html failed: {e}")
+        # No second navigation here — create_window(url=) already loads once.
 
     def _on_loaded() -> None:
         state["loaded"] = True
@@ -425,48 +419,23 @@ def _run_pywebview(target: str) -> int:
     def _boot() -> None:
         time.sleep(0.05)
         _activate_cocoa()
-        if html:
-            try:
-                window.load_html(html, base_uri=base)
-                _log(f"boot load_html base_uri={base} bytes={len(html)}")
-            except Exception as e:
-                _log(f"boot load_html: {e}")
-                try:
-                    window.load_url(base)
-                    _log(f"boot load_url {base}")
-                except Exception as e2:
-                    _log(f"boot load_url: {e2}")
-                    _alert(
-                        "ネイティブ窓への HTML 投入に失敗。\n"
-                        f"{e}\n{e2}\n"
-                        "session.log を確認してください。",
-                        critical=True,
-                    )
-        else:
+        # Soft retry only if first url= navigation never finished (no thrashing).
+        time.sleep(1.2)
+        if not state["loaded"]:
+            _log("loaded event still missing — single load_url retry")
             try:
                 window.load_url(base)
                 _log(f"boot load_url {base}")
             except Exception as e:
                 _log(f"boot load_url: {e}")
-                _alert(f"load_url 失敗: {e}", critical=True)
-
-        # Soft second paint after resources settle (no JS bridge calls)
-        time.sleep(0.8)
-        if html and not state["loaded"]:
-            _log("loaded event still missing — re-load_html once")
-            try:
-                window.load_html(html, base_uri=base)
-            except Exception:
-                try:
-                    window.load_html(html)
-                except Exception as e:
-                    _log(f"reload html failed: {e}")
-        elif not html and not state["loaded"]:
-            _log("loaded event still missing — re-load_url once")
-            try:
-                window.load_url(base)
-            except Exception as e:
-                _log(f"reload url failed: {e}")
+                _alert(
+                    "ネイティブ窓への URL 読み込みに失敗。\n"
+                    f"{e}\n"
+                    "session.log を確認してください。",
+                    critical=True,
+                )
+        else:
+            _log("nav ok — no reload (single url path)")
 
     try:
         webview.start(

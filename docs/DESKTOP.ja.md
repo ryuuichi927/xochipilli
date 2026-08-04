@@ -51,10 +51,15 @@ window created → http://127.0.0.1:8787
 - **Dock が跳ねてすぐ終わる:** ランチャがまだ nohup+exit になっていないか確認
 - **真っ白な窓（タイトルだけ）:**
   1. まずブラウザで http://127.0.0.1:8787/ が暗く見えるか確認（見える＝サーバ OK）
-  2. `session.log` に `cocoa early setContentView_(WKWebView)` と `boot load_html base_uri=` があるか
+  2. `session.log` に `cocoa early setContentView_(WKWebView)` と `using url= navigation (single)` があるか
   3. 無い／古いビルドなら repo の `desktop_app.py` を最新にして Dock 再起動
   4. それでも白ならログ全文を残す（Chrome 自動起動は使わない）
   詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E
+- **暗い UI は見えるがクリック不能 / リサイズ不能:**
+  1. `session.log` が **url 単発**か確認（`using load_html path` / `shown load_html` / `boot load_html` が並んでいたら古い thrash 経路）
+  2. 健全例: `using url= navigation (single)` → `event loaded` → `nav ok — no reload` と `window styleMask=… resizable=True`
+  3. 最新 `desktop_app.py` + `static/style.css` に更新して Dock / `./RUN_DESKTOP.sh` 再起動
+  詳細: Incident F（同日 incidents 文書）
 - **Traceback / icon 引数:** `desktop_app.py` は icon 非対応版 pywebview 向けに修正済み
 - **ポート衝突:** `.env` の `PORT=` または既存 8787
 - **pywebview 無し:** `.venv/bin/pip install pywebview`

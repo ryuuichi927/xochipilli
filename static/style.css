@@ -538,7 +538,18 @@ textarea:focus, button:focus-visible, select:focus-visible {
   background: var(--pin);
   box-shadow: 0 0 10px var(--pin);
 }
-.open-pin.hidden, .hidden { display: none !important; }
+.open-pin.hidden, .hidden { display: none !important; pointer-events: none !important; }
+/* Incident F: overlays must never intercept clicks while hidden */
+.settings-backdrop.hidden,
+.settings-backdrop[hidden],
+.gen-loader.hidden,
+.gen-loader[hidden],
+.settings-panel.hidden,
+.settings-panel[hidden] {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
 
 .lyrics-box { margin-top: 0.55rem; }
 #lyrics { min-height: 4.5rem; }
@@ -631,8 +642,17 @@ textarea:focus, button:focus-visible, select:focus-visible {
   gap: 0;
   overflow: hidden;
 }
-.settings-panel.hidden {
+.settings-panel.hidden,
+.settings-panel[hidden] {
   display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+.settings-backdrop.hidden,
+.settings-backdrop[hidden] {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
 }
 .settings-head {
   display: flex;
@@ -1137,6 +1157,8 @@ video#video {
 .gen-loader.hidden,
 .gen-loader[hidden] {
   display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
 }
 .gen-loader.is-leaving {
   opacity: 0;
