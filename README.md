@@ -50,7 +50,7 @@ cp .env.example .env
 ./RUN_ME.sh
 ```
 
-Factory default without `.env` is `mock`. Failed `xai` / `fal` calls may fall back to mock.
+Without `.env`, the default is `mock`. Under a real provider (`xai` / `fal`), failures return an error — they are not silently treated as successful takes.
 
 ## Data layout
 

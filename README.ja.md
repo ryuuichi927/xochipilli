@@ -50,7 +50,7 @@ cp .env.example .env
 ./RUN_ME.sh
 ```
 
-工場既定（`.env` 無し）は `mock`。`xai` / `fal` 失敗時は生成が mock に落ちることがある。
+`.env` が無いときの既定は `mock`。本物プロバイダ（`xai` / `fal`）の失敗はエラーとして返し、成功した成片のふりをしない。
 
 ## データ配置
 
@@ -66,7 +66,7 @@ cp .env.example .env
 | `static/` | UI（app.js / i18n / style / brand / fonts） |
 | `app/` | FastAPI 本体 |
 | `docs/` | KEYS / VIDEO_API / BRAND / DESKTOP / DEV_LOG など |
-| `tmp/` | 開発用のかす（成果物を置かない） |
+| `tmp/` | 開発用の一時置き場（成果物を置かない） |
 
 削除（設定のプロジェクト削除 / 区間削除 / テイク削除）は **JSON とディスクを揃える**。  
 JSON に無い clips は孤児（古いテイク）なので、必要なら GC 対象。

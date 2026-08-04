@@ -10,7 +10,7 @@
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
 | **`xai`**（別名 `grok`） | **SuperGrok OAuth（Ben's Tool）** または `XAI_API_KEY` | Grok Imagine Video |
 
-失敗時は **mock に落ちる**（区間 note に理由）。
+**本物プロバイダ**では失敗は **エラー**として返す（成功した成片のふりをしない）。mock は `VIDEO_PROVIDER=mock` のときだけ。
 
 ---
 
@@ -39,6 +39,9 @@ VIDEO_PROVIDER=xai
 XAI_VIDEO_MODEL=grok-imagine-video
 XAI_VIDEO_RESOLUTION=720p
 XAI_VIDEO_ASPECT=16:9
+# 連続性（任意）
+# XAI_CHAIN_MODE=extension   # 既定。または i2v
+# CLIP_UNIT_SECONDS=5
 ```
 
 3. サーバ再起動:
@@ -59,7 +62,7 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 - `xai_auth.source`: `bentool-oauth` など
 
 5. UI で区間プロンプト → 生成。  
-   1本 **数十秒〜数分**かかることがある。
+   1本 **数十秒〜数分**かかることがある。長い区間は約5秒単位に分割し、可能なら native Extension、だめなら末フレーム I2V でつなぐ。
 
 ### OAuth が切れているとき
 
@@ -92,16 +95,16 @@ VIDEO_PROVIDER=mock
 
 ---
 
-## まだ無いもの
+## まだ UI に無いもの
 
 - UI からのキー入力（ブラウザに秘密を置かない）  
-- xAI edit / extend を区間ツールから直接叩く（生成のみ）  
-- 区間音声を xAI に載せる条件生成（text→video が主）
+- 「このテイクを延長」ボタン（複数パート生成の内部では Extension 済み）  
+- 区間音声を条件にした生成（主経路は text→video）
 
 ---
 
 ## コード
 
 - `app/xai_auth.py` — OAuth / API key 解決  
-- `app/video_gen.py` — `generate_xai_clip`（`/v1/videos/generations`）  
+- `app/video_gen.py` — 生成 + native Extension  
 - `docs/VIDEO_API*.md` — 本ガイド一式

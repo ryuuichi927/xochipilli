@@ -10,7 +10,7 @@
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
 | **`xai`** (alias `grok`) | **SuperGrok OAuth (Ben's Tool)** or `XAI_API_KEY` | Grok Imagine Video |
 
-On failure the pipeline **falls back to mock** (reason in the segment note).
+Under a **real** provider, failures **raise an error** (they are not silently sold as successful takes). Mock is only used when `VIDEO_PROVIDER=mock`.
 
 ---
 
@@ -39,6 +39,9 @@ VIDEO_PROVIDER=xai
 XAI_VIDEO_MODEL=grok-imagine-video
 XAI_VIDEO_RESOLUTION=720p
 XAI_VIDEO_ASPECT=16:9
+# optional continuity
+# XAI_CHAIN_MODE=extension   # default; or i2v
+# CLIP_UNIT_SECONDS=5
 ```
 
 3. Restart the server:
@@ -59,7 +62,7 @@ Expect:
 - `xai_auth.source`: e.g. `bentool-oauth`
 
 5. In the UI: segment prompt → Generate.  
-   One clip may take **tens of seconds to a few minutes**.
+   One clip may take **tens of seconds to a few minutes**. Long segments are split into ~5s units and chained (native Extension when available, else last-frame I2V).
 
 ### When OAuth expires
 
@@ -92,10 +95,10 @@ VIDEO_PROVIDER=mock
 
 ---
 
-## Not built yet
+## Not in the UI yet
 
 - Entering keys from the UI (secrets stay out of the browser)  
-- xAI edit / extend as direct segment tools (generate only today)  
+- Manual “extend this take” button (Extension already runs inside multi-part generate)  
 - Conditioning xAI on segment audio (text→video is primary)
 
 ---
@@ -103,5 +106,5 @@ VIDEO_PROVIDER=mock
 ## Code map
 
 - `app/xai_auth.py` — OAuth / API key resolution  
-- `app/video_gen.py` — `generate_xai_clip` (`/v1/videos/generations`)  
+- `app/video_gen.py` — generate + native Extension  
 - `docs/VIDEO_API*.md` — this guide family

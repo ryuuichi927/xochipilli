@@ -10,7 +10,7 @@
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
 | **`xai`**（别名 `grok`） | **SuperGrok OAuth（Ben's Tool）** 或 `XAI_API_KEY` | Grok Imagine Video |
 
-失败时会 **回落到 mock**（原因写在区间 note）。
+在 **真实提供方** 下，失败会 **直接报错**（不会悄悄当成成功成片）。只有 `VIDEO_PROVIDER=mock` 时才使用 mock。
 
 ---
 
@@ -39,6 +39,9 @@ VIDEO_PROVIDER=xai
 XAI_VIDEO_MODEL=grok-imagine-video
 XAI_VIDEO_RESOLUTION=720p
 XAI_VIDEO_ASPECT=16:9
+# 连续性（可选）
+# XAI_CHAIN_MODE=extension   # 默认；或 i2v
+# CLIP_UNIT_SECONDS=5
 ```
 
 3. 重启服务：
@@ -59,7 +62,7 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 - `xai_auth.source`: 如 `bentool-oauth`
 
 5. 在 UI 写区间提示词 → 生成。  
-   一条可能需要 **数十秒到数分钟**。
+   一条可能需要 **数十秒到数分钟**。长区间会按约 5 秒切分并衔接（优先 native Extension，否则末帧 I2V）。
 
 ### OAuth 失效时
 
@@ -92,10 +95,10 @@ VIDEO_PROVIDER=mock
 
 ---
 
-## 尚未具备
+## 界面上尚未具备
 
 - 从 UI 输入密钥（秘密不进浏览器）  
-- 从区间工具直接调用 xAI edit / extend（目前仅生成）  
+- 「延长此成片」按钮（多分段生成内部已使用 Extension）  
 - 以区间音频条件生成（主路径仍是 text→video）
 
 ---
@@ -103,5 +106,5 @@ VIDEO_PROVIDER=mock
 ## 代码
 
 - `app/xai_auth.py` — OAuth / API key 解析  
-- `app/video_gen.py` — `generate_xai_clip`（`/v1/videos/generations`）  
+- `app/video_gen.py` — 生成 + native Extension  
 - `docs/VIDEO_API*.md` — 本指南三语

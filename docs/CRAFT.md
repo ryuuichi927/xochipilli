@@ -37,6 +37,15 @@ Personalization and segment craft controls for Xochipilli.
 - 区間の役割（同じ場面 / 転換 / カメラを動かす）
 - 5秒単位の部分だけ焼き直す（知る人ぞ知る操作）
 
+### 起動
+
+```bash
+./RUN_ME.sh          # app.server:app（Craft 込み）
+./RUN_DESKTOP.sh     # desktop も app.server を指すこと
+```
+
+`app.main:app` だけだと Craft ルートが載らない場合がある。起動は `app.server` を使う。
+
 ---
 
 ## Product position (EN)
@@ -46,6 +55,15 @@ Personalization and segment craft controls for Xochipilli.
 The split into `craft.py` / `taste.py` / `craft_routes.py` is an engineering boundary (stable video engine first, then edit/personalization). End users should experience one product; “Craft” is the internal name for mode, structured Unmatch, taste memory, and partial subclip regen.
 
 `app.main` = core engine. `app.server` = core + Craft routes at boot. Over time Craft logic should sit fully inside pin / generate / select so the entry-point distinction can fade.
+
+### Launch
+
+```bash
+./RUN_ME.sh          # app.server:app (includes Craft)
+./RUN_DESKTOP.sh     # desktop should also target app.server
+```
+
+Booting `app.main:app` alone may omit Craft routes. Prefer `app.server`.
 
 ---
 
@@ -67,15 +85,6 @@ The split into `craft.py` / `taste.py` / `craft_routes.py` is an engineering bou
 | **motion** | Camera may move | Chain OK; lock forced off |
 
 Pin should create segments with `mode=hold` via `enrich_new_segment` when that path is wired.
-
-## Launch
-
-```bash
-./RUN_ME.sh          # app.server:app  （Craft 込み）
-./RUN_DESKTOP.sh     # desktop → app.server を指していること
-```
-
-`app.main:app` だけだと Craft ルートが載らない場合がある。起動は `app.server` を使う。
 
 ## Partial regen
 

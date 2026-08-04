@@ -1,4 +1,4 @@
-# Xochipilli（肖奇皮利 / ショチピリ）
+# Xochipilli（肖奇皮利）
 
 [English](README.md) | [日本語](README.ja.md) | **中文**
 
@@ -24,23 +24,23 @@ cd /path/to/music-film-workbench
 打开 http://127.0.0.1:8787
 
 ## 用法要点
-1. **导入曲目（消化）** — 生成分析用信号（重新导入会重置区间与 clips）
-2. 播放 / 定位。点击区间框进入编辑。**用 P 打钉**（播放头位置）
+1. **导入曲目（消化）** — 生成分析用信号（重新导入会重置区间与片段）
+2. 播放 / 定位。点击区间框进入编辑。**用 P 打点**（播放头位置）
 3. 为区间写 **影像提示词**。AI 情感关键词仅供参考
-4. 体感不对 → **Unmatch**
+4. 感觉不对 → **Unmatch**
 5. **生成影像** — 在 `.env` 设置 `VIDEO_PROVIDER`（默认 `mock`）
 
 ## 键盘
-**正本：** [docs/KEYS.zh.md](docs/KEYS.zh.md) · [EN](docs/KEYS.md) · [JA](docs/KEYS.ja.md)
+**正式说明：** [docs/KEYS.zh.md](docs/KEYS.zh.md) · [EN](docs/KEYS.md) · [JA](docs/KEYS.ja.md)
 
-Space 播放 · R 曲首 · **P** 打钉 · **K** 框起点 · **L** 循环 · **F** 适配 · **Tab** · 其余见 KEYS（输入时无效）
+Space 播放 · R 曲首 · **P** 打点 · **K** 框起点 · **L** 循环 · **F** 适配 · **Tab** · 其余见 KEYS（输入文字时无效）
 
 ## 界面语言
 右上角 ⚙ — 日 / 英 / 中（`mfw.lang`）
 
 ## 影像 API（自有密钥 / SuperGrok OAuth）
 
-**步骤正本：** [docs/VIDEO_API.zh.md](docs/VIDEO_API.zh.md) · [EN](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md)
+**步骤说明：** [docs/VIDEO_API.zh.md](docs/VIDEO_API.zh.md) · [EN](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md)
 
 ```bash
 cp .env.example .env
@@ -50,7 +50,7 @@ cp .env.example .env
 ./RUN_ME.sh
 ```
 
-无 `.env` 时工厂默认为 `mock`。`xai` / `fal` 失败时生成可能回落到 mock。
+未配置 `.env` 时默认为 `mock`。真实提供方（`xai` / `fal`）失败时会报错，不会悄悄当成成功成片。
 
 ## 数据布局
 
@@ -60,16 +60,16 @@ cp .env.example .env
 | `data/projects/<id>/digest.json` | 消化详情（series、peaks 等）；服务端用于区间特征 |
 | `data/projects/<id>/source.*` | 导入音源（**当前 1 份**；重导会替换） |
 | `data/projects/<id>/analysis.wav` | 消化用单声道信号 |
-| `data/projects/<id>/clips/` | テイク mp4、区间音频切片、连锁帧、program.mp4 |
+| `data/projects/<id>/clips/` | 成片 mp4、区间音频切片、衔接帧、`program.mp4` |
 | `data/projects/<id>/refs/` | 区间参考静帧（i2v） |
 | `theory/` | digest / mapping 理论 JSON |
 | `static/` | UI（app.js / i18n / style / brand / fonts） |
-| `app/` | FastAPI 本体 |
+| `app/` | FastAPI 后端 |
 | `docs/` | KEYS / VIDEO_API / BRAND / DESKTOP / DEV_LOG 等 |
-| `tmp/` | 开发临时（不放成品） |
+| `tmp/` | 开发临时目录（不放成品） |
 
-删除（设置里删项目 / 删区间 / 删テイク）会保持 **JSON 与磁盘一致**。  
-JSON 中没有的 clips 是孤儿（旧テイク），需要时可 GC。
+删除（设置里删项目 / 删区间 / 删成片）会保持 **JSON 与磁盘一致**。  
+JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 
 ## 文档一览（英 · 日 · 中）
 
