@@ -991,6 +991,42 @@ video#video {
   margin: 0;
 }
 
+.mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.5rem;
+}
+.mode-select {
+  background: var(--panel-2, #1a1e26);
+  color: inherit;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.85rem;
+}
+.mode-hint {
+  flex: 1 1 12rem;
+  font-size: 0.75rem;
+}
+.regen-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+.regen-input {
+  width: 6.5rem;
+  background: var(--panel-2, #1a1e26);
+  color: inherit;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.8rem;
+}
+
 .camera-lock-label {
   display: inline-flex;
   align-items: center;

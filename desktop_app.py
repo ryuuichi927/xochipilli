@@ -123,7 +123,7 @@ def _start_server() -> subprocess.Popen | None:
         py,
         "-m",
         "uvicorn",
-        "app.main:app",
+        "app.server:app",
         "--host",
         HOST,
         "--port",

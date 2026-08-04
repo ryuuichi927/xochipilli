@@ -1406,6 +1406,50 @@ function renderSegments() {
     });
     card.appendChild(ta);
 
+    // Segment craft mode: hold | shift | motion
+    const modeRow = document.createElement("div");
+    modeRow.className = "mode-row";
+    const modeLab = document.createElement("span");
+    modeLab.className = "mini";
+    modeLab.textContent = t("segMode") + ":";
+    modeRow.appendChild(modeLab);
+    const modeSel = document.createElement("select");
+    modeSel.className = "mode-select";
+    for (const m of ["hold", "shift", "motion"]) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = t("mode_" + m);
+      modeSel.appendChild(opt);
+    }
+    modeSel.value = s.mode || "hold";
+    modeSel.addEventListener("change", async () => {
+      const mode = modeSel.value;
+      try {
+        const data = await api(`/api/projects/${state.project.id}/segments/${s.id}/mode`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode }),
+        });
+        const seg = (state.project.segments || []).find((x) => x.id === s.id);
+        if (seg && data) Object.assign(seg, data);
+        commitHistory("mode");
+        setStatus(t("statusModeSet", { mode: t("mode_" + (data.mode || mode)) }));
+        renderSegments();
+      } catch (e) {
+        modeSel.value = s.mode || "hold";
+        setStatus(t("statusModeFail", { err: e.message }));
+      }
+    });
+    modeRow.appendChild(modeSel);
+    const modeHint = document.createElement("span");
+    modeHint.className = "hint mode-hint";
+    modeHint.textContent = t("modeHint_" + (modeSel.value || "hold"));
+    modeSel.addEventListener("input", () => {
+      modeHint.textContent = t("modeHint_" + modeSel.value);
+    });
+    modeRow.appendChild(modeHint);
+    card.appendChild(modeRow);
+
     // Reference image for i2v generate
     const refRow = document.createElement("div");
     refRow.className = "ref-row";
@@ -1612,6 +1656,9 @@ function renderSegments() {
         const bits = [c.provider || "?", c.model || "", c.file || ""];
         if (c.chained) bits.push(t("chained"));
         if (c.camera_lock) bits.push(t("cameraLock"));
+        if (c.segment_mode) bits.push(t("mode_" + c.segment_mode));
+        if (c.subclip_count) bits.push(`${c.subclip_count}×5s`);
+        if (c.is_mock) bits.push("mock");
         meta.textContent = bits.filter(Boolean).join(" · ");
         if (c.chained) meta.classList.add("chain-tag");
         if (c.camera_lock) meta.classList.add("lock-tag");
@@ -1623,12 +1670,38 @@ function renderSegments() {
           note.textContent = c.note;
           left.appendChild(note);
         }
+        // Partial regen (subclips)
+        const subs = c.subclips || [];
+        if (subs.length > 1) {
+          const regenRow = document.createElement("div");
+          regenRow.className = "regen-row";
+          const regenLab = document.createElement("span");
+          regenLab.className = "mini";
+          regenLab.textContent = t("regenSubclips") + ":";
+          regenRow.appendChild(regenLab);
+          const regenIn = document.createElement("input");
+          regenIn.type = "text";
+          regenIn.className = "regen-input";
+          regenIn.placeholder = t("regenPlaceholder");
+          regenIn.title = t("regenHelp");
+          regenRow.appendChild(regenIn);
+          const bReg = document.createElement("button");
+          bReg.type = "button";
+          bReg.className = "ghost";
+          bReg.textContent = t("btnRegenParts");
+          bReg.onclick = (ev) => {
+            ev.stopPropagation();
+            regenSubclips(s.id, c.id, regenIn.value).catch((e) => setStatus(e.message));
+          };
+          regenRow.appendChild(bReg);
+          left.appendChild(regenRow);
+        }
         const acts = document.createElement("div");
         acts.className = "clip-actions";
         const bUse = document.createElement("button");
         bUse.type = "button";
         bUse.textContent = t("btnUseClip");
-        bUse.disabled = isActive;
+        bUse.disabled = isActive || !!c.is_mock;
         bUse.onclick = (ev) => {
           ev.stopPropagation();
           selectClip(s.id, c.id).catch((e) => setStatus(e.message));
@@ -1921,18 +1994,58 @@ async function generateSeg(sid, promptText) {
 }
 
 async function unmatchSeg(sid) {
+  const reason = window.prompt(
+    t("unmatchReasonPrompt"),
+    "other"
+  );
+  if (reason === null) return;
   const note = window.prompt(t("unmatchPrompt"), "") ?? "";
   try {
-    await api(`/api/projects/${state.project.id}/segments/${sid}/unmatch`, {
+    await api(`/api/projects/${state.project.id}/segments/${sid}/unmatch-v2`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ editor_note: note, editor_keywords: [] }),
+      body: JSON.stringify({
+        reason: (reason || "other").trim() || "other",
+        editor_note: note,
+        editor_keywords: [],
+      }),
     });
     await loadProject(state.project.id);
     setStatus(t("statusUnmatchOk"));
     commitHistory("unmatch");
   } catch (e) {
     setStatus(t("statusUnmatchFail", { err: e.message }));
+  }
+}
+
+async function regenSubclips(sid, clipId, rawIndices) {
+  const indices = String(rawIndices || "")
+    .split(/[\s,]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map((x) => parseInt(x, 10))
+    .filter((n) => Number.isFinite(n));
+  if (!indices.length) {
+    setStatus(t("statusRegenNeedIdx"));
+    return;
+  }
+  setStatus(t("statusRegenBusy", { n: indices.join(",") }));
+  try {
+    const data = await api(
+      `/api/projects/${state.project.id}/segments/${sid}/clips/${clipId}/regen-subclips`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ indices }),
+      }
+    );
+    const seg = (state.project.segments || []).find((x) => x.id === sid);
+    if (seg && data.segment) Object.assign(seg, data.segment);
+    commitHistory("regen-subclips");
+    renderSegments();
+    setStatus(t("statusRegenOk"));
+  } catch (e) {
+    setStatus(t("statusRegenFail", { err: e.message }));
   }
 }
 

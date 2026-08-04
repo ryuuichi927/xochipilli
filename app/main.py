@@ -28,6 +28,7 @@ from .emotion import emotion_keywords
 from .mapping import build_constraints, compose_video_prompt
 from .paths import ROOT, STATIC
 from . import storage
+from . import craft
 from .program_export import build_program_mp4
 
 # Load project .env (FAL_KEY, VIDEO_PROVIDER, …). Does not override already-set env.
@@ -351,6 +352,7 @@ def api_pin(pid: str, body: PinBody):
         "video": None,
         "unmatched": False,
     }
+    craft.enrich_new_segment(seg)
     p["segments"].append(seg)
     p["open_pin"] = None
     storage.save_project(p)
@@ -597,7 +599,18 @@ async def _api_generate_inner(pid: str, sid: str):
                         start_image = None
                         chain = False
 
+    # Craft mode: hold / shift / motion → chain + lock policy
+    if not seg.get("mode"):
+        craft.enrich_new_segment(seg)
     cam_lock = bool(seg.get("camera_lock"))
+    start_image, chain, cam_lock, seg_mode = craft.apply_segment_mode(
+        seg,
+        start_image=start_image,
+        chain=chain,
+        cam_lock=cam_lock,
+        user_ref=user_ref,
+    )
+
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
     tags = tags + list(seg.get("emotion_keywords") or [])
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
@@ -607,6 +620,8 @@ async def _api_generate_inner(pid: str, sid: str):
         n_parts = 1
 
     provider = _provider_name()
+    # Internal multi-part may still use Extension; prev-segment chain already
+    # cleared by apply_segment_mode when mode=shift.
     want_extension = (
         provider == "xai" and n_parts > 1 and xai_chain_mode() == "extension"
     )
@@ -639,7 +654,8 @@ async def _api_generate_inner(pid: str, sid: str):
             part_dur = max(2.0, dur - unit * (n_parts - 1))
 
         chain_here = bool(cur_start) and (chain or user_ref or i > 0)
-        lock_here = bool(cam_lock)
+        # shift/motion never lock; hold uses user camera_lock only
+        lock_here = craft.lock_for_part(cam_lock=cam_lock, mode=seg_mode)
 
         composed = compose_video_prompt(
             seg["prompt"],
@@ -838,6 +854,7 @@ async def _api_generate_inner(pid: str, sid: str):
         "user_ref_image": bool(user_ref),
         "ref_image": seg.get("ref_image") if user_ref else None,
         "camera_lock": bool(cam_lock),
+        "segment_mode": seg_mode,
         "clip_unit_seconds": unit,
         "subclip_count": n_parts,
         "subclips": subclips,
@@ -867,6 +884,7 @@ def api_select_clip(pid: str, sid: str, body: ClipSelectBody):
     hit = next((c for c in clips if c.get("id") == body.clip_id), None)
     if not hit:
         raise HTTPException(404, "clip not found")
+    craft.assert_adoptable(hit, _provider_name())
     seg["active_clip_id"] = hit["id"]
     seg["video"] = dict(hit)
     storage.save_project(p)
