@@ -1,13 +1,15 @@
 """
-Xochipilli desktop shell: local FastAPI + **native pywebview window only**.
+Xochipilli desktop shell: local FastAPI + native pywebview (cocoa) only.
 
-Chrome / Safari are NOT opened from Dock (user request 2026-08-04).
-Optional escape hatch: XOCHIPILLI_SHELL=browser opens the system default browser.
+No Chrome/Safari auto-launch from Dock.
+Opt-in browser: XOCHIPILLI_SHELL=browser
 
-Usage:
-  .venv/bin/python desktop_app.py
-  ./RUN_DESKTOP.sh
-  Dock → /Applications/Xochipilli.app
+White-screen root cause (2026-08-04 Incident B/E):
+  pywebview cocoa attaches WKWebView as NSWindow contentView only inside
+  webView_didFinishNavigation_. Until then the client area is empty/white.
+  Fix: monkey-patch BrowserView.__init__ to setContentView_ + autoresize immediately.
+  Prefer load_html(index, base_uri=http://127.0.0.1:PORT/) so first paint is local HTML
+  with a correct http origin for /static and /api.
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-# Strip agent/Ben's Tool pollution before any third-party import
 os.environ.pop("PYTHONPATH", None)
 os.environ.pop("PYTHONHOME", None)
 _clean_path: list[str] = []
@@ -45,7 +46,7 @@ PORT = int(os.environ.get("PORT", "8787"))
 URL = f"http://{HOST}:{PORT}"
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
-CHROME_PROFILE = SUPPORT / "chrome-app-profile"  # legacy; kill on launch if still running
+CHROME_PROFILE = SUPPORT / "chrome-app-profile"
 
 
 def _log(msg: str) -> None:
@@ -55,10 +56,10 @@ def _log(msg: str) -> None:
 def _alert(message: str, *, critical: bool = False) -> None:
     try:
         style = "critical" if critical else "informational"
-        msg = str(message)[:500]
+        msg = str(message)[:520]
         script = (
             "on run argv\n"
-            f'  display alert "Xochipilli" message (item 1 of argv) as {style} giving up after 14\n'
+            f'  display alert "Xochipilli" message (item 1 of argv) as {style} giving up after 16\n'
             "end run"
         )
         subprocess.run(
@@ -119,7 +120,8 @@ def _preflight_http() -> tuple[bool, str]:
             body = r.read()
             if r.status != 200:
                 return False, f"GET / status={r.status}"
-            if b"<html" not in body.lower() and b"<!DOCTYPE" not in body[:200]:
+            low = body[:200].lower()
+            if b"<html" not in low and b"<!doctype" not in low:
                 return False, f"GET / not html ({len(body)} bytes)"
             return True, f"GET / ok ({len(body)} bytes)"
     except Exception as e:
@@ -137,7 +139,7 @@ def _start_server() -> subprocess.Popen | None:
                 _log(f"reuse server at {URL} (became healthy)")
                 return None
             time.sleep(0.25)
-        msg = f"ポート {PORT} は使われているが Xochipilli の /api/health が応答しない。"
+        msg = f"ポート {PORT} は使用中だが Xochipilli の /api/health が応答しない。"
         _log(f"WARN: {msg}")
         _alert(msg, critical=True)
 
@@ -207,7 +209,6 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
 
 
 def _kill_legacy_chrome_app() -> None:
-    """Stop previous --app chrome profile so Dock never leaves a Chrome window around."""
     try:
         r = subprocess.run(
             ["pgrep", "-f", str(CHROME_PROFILE)],
@@ -237,6 +238,44 @@ def _activate_cocoa() -> None:
         _log(f"cocoa activate skipped: {e}")
 
 
+def _patch_cocoa_early_content_view() -> bool:
+    """Attach WKWebView as contentView immediately (do not wait for didFinish)."""
+    try:
+        import webview.platforms.cocoa as cocoa
+        from AppKit import NSViewHeightSizable, NSViewWidthSizable
+    except Exception as e:
+        _log(f"cocoa patch import failed: {e}")
+        return False
+
+    if getattr(cocoa.BrowserView, "_xochipilli_early_cv", False):
+        return True
+
+    orig_init = cocoa.BrowserView.__init__
+
+    def _init(self, window):  # type: ignore[no-untyped-def]
+        orig_init(self, window)
+        try:
+            wv = self.webview
+            try:
+                wv.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+            except Exception as e:
+                _log(f"autoresize mask: {e}")
+            # Always set as content view up front — fixes pure-white empty client area
+            try:
+                self.window.setContentView_(wv)
+                self.window.makeFirstResponder_(wv)
+                _log("cocoa early setContentView_(WKWebView)")
+            except Exception as e:
+                _log(f"early setContentView failed: {e}")
+        except Exception as e:
+            _log(f"cocoa early patch body failed: {e}")
+
+    cocoa.BrowserView.__init__ = _init  # type: ignore[method-assign]
+    cocoa.BrowserView._xochipilli_early_cv = True  # type: ignore[attr-defined]
+    _log("cocoa BrowserView.__init__ patched for early contentView")
+    return True
+
+
 def _fetch_index_html() -> str | None:
     try:
         with urllib.request.urlopen(f"{URL}/", timeout=3.0) as r:
@@ -248,17 +287,48 @@ def _fetch_index_html() -> str | None:
         return None
 
 
-def _absolutize_html(html: str, base: str) -> str:
-    """Point /static and root-relative assets at the live server origin."""
+def _prepare_html(html: str, base: str) -> str:
+    """Ensure <base href> and absolute /static so first paint cannot miss CSS."""
     b = base if base.endswith("/") else base + "/"
-    return (
-        html.replace('href="/static/', f'href="{b}static/')
+    out = html
+    if "<base " not in out.lower():
+        inject = f'<base href="{b}">'
+        low = out.lower()
+        idx = low.find("<head>")
+        if idx >= 0:
+            out = out[: idx + 6] + inject + out[idx + 6 :]
+        else:
+            out = inject + out
+    # absolute static (belt + suspenders if base ignored)
+    out = (
+        out.replace('href="/static/', f'href="{b}static/')
         .replace("href='/static/", f"href='{b}static/")
         .replace('src="/static/', f'src="{b}static/')
         .replace("src='/static/", f"src='{b}static/")
         .replace('href="/favicon', f'href="{b}favicon')
-        .replace('action="/', f'action="{b}')
     )
+    return out
+
+
+_ERROR_HTML = """<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8"/>
+<style>
+ html,body{margin:0;height:100%;background:#0c0e12;color:#e8d48b;
+  font:15px/1.45 -apple-system,system-ui,sans-serif;
+  display:flex;align-items:center;justify-content:center}
+ .box{max-width:28rem;padding:1.5rem;text-align:center}
+ .err{color:#f0a8a8;margin-top:1rem;font-size:13px;white-space:pre-wrap;text-align:left}
+ a{color:#c9a227}
+</style></head><body><div class="box">
+<strong>Xochipilli</strong>
+<p>ネイティブ窓の表示に失敗しました。</p>
+<div class="err">__ERR__</div>
+<p style="margin-top:1rem;font-size:13px;opacity:.8">
+ログ: ~/Library/Logs/Xochipilli/session.log<br/>
+ブラウザ確認: <a href="__URL__">__URL__</a>
+（自動では Chrome を開きません）
+</p></div></body></html>
+"""
 
 
 def _run_pywebview(target: str) -> int:
@@ -268,10 +338,12 @@ def _run_pywebview(target: str) -> int:
         _alert(
             "pywebview が入っていない。\n"
             f"{VENV_PY} -m pip install pywebview\n"
-            "Dock からは Chrome を自動起動しません。",
+            "Dock から Chrome は自動起動しません。",
             critical=True,
         )
         return 1
+
+    _patch_cocoa_early_content_view()
 
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.settings["ALLOW_FILE_URLS"] = True
@@ -280,21 +352,35 @@ def _run_pywebview(target: str) -> int:
     storage.mkdir(parents=True, exist_ok=True)
 
     base = target if target.endswith("/") else target + "/"
+    html_raw = _fetch_index_html()
+    html = _prepare_html(html_raw, base) if html_raw else None
 
-    # Single path: native window loads the live FastAPI origin directly.
-    # (Earlier html/load_html races left a white frame and skipped `loaded`.)
-    window_kwargs: dict = {
-        "title": "Xochipilli",
-        "url": base,
-        "width": 1440,
-        "height": 900,
-        "min_size": (960, 640),
-        "background_color": "#0c0e12",
-        "text_select": True,
-        "resizable": True,
-        "confirm_close": False,
-        "focus": True,
-    }
+    if html:
+        _log(f"using load_html path bytes={len(html)} base={base}")
+        window_kwargs: dict = {
+            "title": "Xochipilli",
+            "html": html,
+            "width": 1440,
+            "height": 900,
+            "min_size": (960, 640),
+            "background_color": "#0c0e12",
+            "text_select": True,
+            "resizable": True,
+            "focus": True,
+        }
+    else:
+        _log("index fetch failed — falling back to url=")
+        window_kwargs = {
+            "title": "Xochipilli",
+            "url": base,
+            "width": 1440,
+            "height": 900,
+            "min_size": (960, 640),
+            "background_color": "#0c0e12",
+            "text_select": True,
+            "resizable": True,
+            "focus": True,
+        }
 
     try:
         window = webview.create_window(**window_kwargs)
@@ -304,24 +390,31 @@ def _run_pywebview(target: str) -> int:
         window = webview.create_window(**window_kwargs)
 
     print("[xochipilli] shell_mode=pywebview", flush=True)
-    _log(f"window created url={base}")
+    _log(f"window created ({'html' if html else 'url'}) → {base}")
+
+    state = {"loaded": False}
 
     def _on_shown() -> None:
         _log("event shown")
         _activate_cocoa()
+        if html:
+            try:
+                window.load_html(html, base_uri=base)
+                _log(f"shown load_html base_uri={base}")
+            except TypeError:
+                try:
+                    window.load_html(html)
+                    _log("shown load_html (no base_uri kw)")
+                except Exception as e:
+                    _log(f"shown load_html failed: {e}")
+            except Exception as e:
+                _log(f"shown load_html failed: {e}")
 
     def _on_loaded() -> None:
-        _log("event loaded")
-        try:
-            snippet = window.evaluate_js(
-                "(document.body && (document.body.innerText||'').trim().slice(0,80)) || ''"
-            )
-            _log(f"dom snippet={snippet!r}")
-            if not snippet or len(str(snippet).strip()) < 4:
-                _log("blank DOM → reload url")
-                window.load_url(base)
-        except Exception as e:
-            _log(f"loaded check: {e}")
+        state["loaded"] = True
+        # Do NOT evaluate_js on the full workbench page — on this host the JS bridge
+        # can block forever after inject (hangs desktop_app). Trust load + early CV.
+        _log("event loaded (no evaluate_js — avoid bridge hang on full UI)")
 
     try:
         window.events.shown += _on_shown
@@ -332,13 +425,48 @@ def _run_pywebview(target: str) -> int:
     def _boot() -> None:
         time.sleep(0.05)
         _activate_cocoa()
-        # Soft reload once after show (helps WKWebView first paint on some macOS builds)
-        try:
-            time.sleep(0.4)
-            window.load_url(base)
-            _log(f"boot load_url {base}")
-        except Exception as e:
-            _log(f"boot load_url failed: {e}")
+        if html:
+            try:
+                window.load_html(html, base_uri=base)
+                _log(f"boot load_html base_uri={base} bytes={len(html)}")
+            except Exception as e:
+                _log(f"boot load_html: {e}")
+                try:
+                    window.load_url(base)
+                    _log(f"boot load_url {base}")
+                except Exception as e2:
+                    _log(f"boot load_url: {e2}")
+                    _alert(
+                        "ネイティブ窓への HTML 投入に失敗。\n"
+                        f"{e}\n{e2}\n"
+                        "session.log を確認してください。",
+                        critical=True,
+                    )
+        else:
+            try:
+                window.load_url(base)
+                _log(f"boot load_url {base}")
+            except Exception as e:
+                _log(f"boot load_url: {e}")
+                _alert(f"load_url 失敗: {e}", critical=True)
+
+        # Soft second paint after resources settle (no JS bridge calls)
+        time.sleep(0.8)
+        if html and not state["loaded"]:
+            _log("loaded event still missing — re-load_html once")
+            try:
+                window.load_html(html, base_uri=base)
+            except Exception:
+                try:
+                    window.load_html(html)
+                except Exception as e:
+                    _log(f"reload html failed: {e}")
+        elif not html and not state["loaded"]:
+            _log("loaded event still missing — re-load_url once")
+            try:
+                window.load_url(base)
+            except Exception as e:
+                _log(f"reload url failed: {e}")
 
     try:
         webview.start(
@@ -366,7 +494,6 @@ def _run_pywebview(target: str) -> int:
 
 
 def _run_browser_only(target: str) -> int:
-    """Opt-in only: XOCHIPILLI_SHELL=browser"""
     _log(f"shell_mode=browser (explicit) → {target}")
     print("[xochipilli] shell_mode=browser", flush=True)
     webbrowser.open(target)
@@ -387,7 +514,6 @@ def main() -> int:
     _log(f"desktop_app start pid={os.getpid()} py={sys.executable}")
     _log(f"sys.path[0:4]={sys.path[:4]}")
 
-    # Never leave a previous Chrome --app session hanging off Dock
     _kill_legacy_chrome_app()
 
     server = _start_server()
@@ -397,7 +523,7 @@ def main() -> int:
     _log(f"preflight: {http_msg}")
     if not ok_http:
         _alert(
-            "ローカル UI に届かない。\n"
+            "ローカル UI に届かない（サーバ側）。\n"
             f"{http_msg}\n"
             "session.log を確認するか ./RUN_ME.sh を試してください。",
             critical=True,
@@ -407,7 +533,6 @@ def main() -> int:
     shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview").strip().lower()
 
     if shell in ("browser", "chrome", "safari", "system"):
-        # Explicit opt-in only — never default
         rc = _run_browser_only(target)
         _stop_server(server)
         return rc

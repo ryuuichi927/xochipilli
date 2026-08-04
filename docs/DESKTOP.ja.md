@@ -49,8 +49,14 @@ window created → http://127.0.0.1:8787
 ## トラブル
 - **何も起きない:** 上記ログを確認。一度 `xattr -cr /Applications/Xochipilli.app` のあと再クリック
 - **Dock が跳ねてすぐ終わる:** ランチャがまだ nohup+exit になっていないか確認
-- **真っ白な窓（タイトルだけ）:** WKWebView が URL を描けていない。暗い bootstrap + `load_html(..., base_uri=…)` で対処。詳細は [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)。session.log に `load_html ok` が出るのが健全
+- **真っ白な窓（タイトルだけ）:**
+  1. まずブラウザで http://127.0.0.1:8787/ が暗く見えるか確認（見える＝サーバ OK）
+  2. `session.log` に `cocoa early setContentView_(WKWebView)` と `boot load_html base_uri=` があるか
+  3. 無い／古いビルドなら repo の `desktop_app.py` を最新にして Dock 再起動
+  4. それでも白ならログ全文を残す（Chrome 自動起動は使わない）
+  詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E
 - **Traceback / icon 引数:** `desktop_app.py` は icon 非対応版 pywebview 向けに修正済み
 - **ポート衝突:** `.env` の `PORT=` または既存 8787
 - **pywebview 無し:** `.venv/bin/pip install pywebview`
 - **Ben's Tool の PYTHONPATH 混入:** run.sh で解除。desktop_app も `/.bentool/` を sys.path から落とす
+- **ブラウザで開きたいときだけ:** `XOCHIPILLI_SHELL=browser`（Dock 既定では開かない）

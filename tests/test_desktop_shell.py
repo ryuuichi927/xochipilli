@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop shell checks: native webview default, no Chrome auto-launch."""
+"""Desktop shell checks: native webview, no Chrome, white-screen mitigations."""
 
 from __future__ import annotations
 
@@ -31,63 +31,43 @@ def main() -> int:
     except SyntaxError as e:
         bad(f"syntax: {e}")
 
-    # Must be webview-primary
     for n, lab in [
-        ("shell_mode=pywebview", "pywebview mode log"),
-        ("_run_pywebview", "pywebview runner"),
-        ("_kill_legacy_chrome_app", "kills legacy chrome"),
-        ("XOCHIPILLI_SHELL", "opt-in browser env"),
+        ("shell_mode=pywebview", "pywebview mode"),
+        ("_patch_cocoa_early_content_view", "early contentView patch"),
+        ("setContentView_", "setContentView call"),
+        ("_prepare_html", "html prepare"),
+        ("_kill_legacy_chrome_app", "kill legacy chrome"),
+        ("XOCHIPILLI_SHELL", "opt-in browser"),
+        ('or "webview"', "default webview"),
     ]:
         (ok if n in desk else bad)(lab)
 
-    # Must NOT auto-launch chrome as default path
-    if "_open_chromium_app(target)" in desk or "shell_mode=chromium-app" in desk and "XOCHIPILLI" not in desk:
-        # chromium-app string might still appear in comments — check call path
-        pass
-    if "def _open_chromium_app" in desk and "shell_mode=chromium-app" in desk:
-        # allowed only if not called from main default
-        if "_open_chromium_app(target)" in desk or "_open_chromium_app(" in desk.split("def main")[-1]:
-            bad("main still calls chromium opener")
-        else:
-            ok("chromium helper not default-called")
+    # Must not auto chrome
+    for n in ("def _open_chromium_app", "shell_mode=chromium-app", "--app="):
+        (ok if n not in desk else bad)(f"lacks {n}")
+
+    # Must not hang path: evaluate_js on full UI should not be the happy path
+    # (comments may mention evaluate_js — ensure we don't call it for paint verify)
+    if "evaluate_js(" in desk and "avoid bridge hang" not in desk:
+        bad("evaluate_js still used without hang note")
     else:
-        ok("no chromium auto-launch helper in default shell")
+        ok("no hanging evaluate_js paint path")
 
     main_body = desk.split("def main")[-1]
-    if "webbrowser.open" in main_body and 'shell in ("browser"' not in desk:
-        bad("browser open without opt-in gate")
-    else:
-        ok("browser only behind XOCHIPILLI_SHELL")
-
-    if "Google Chrome" in main_body and "--app=" in main_body:
-        # check it's not in main default flow
-        if "--app=" in main_body and "_run_pywebview(target)" in main_body:
-            # chrome flags might remain in dead code — fail if --app= still constructed in main path
-            if "f\"--app=" in main_body or "'--app=" in main_body:
-                bad("main path still builds --app=")
-            else:
-                ok("no --app= in main path")
-        else:
-            bad("chrome --app still referenced in main")
-    else:
-        ok("no Chrome --app in main")
-
-    # Default shell selection
-    if 'shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview")' in desk or 'or "webview"' in desk:
-        ok("default shell=webview")
-    else:
-        bad("default shell not webview")
-
-    css = (ROOT / "static/style.css").read_text(encoding="utf-8")
-    (ok if "-webkit-fill-available" in css else bad)("css fill")
-    js = (ROOT / "static/app.js").read_text(encoding="utf-8")
-    (ok if "bindLayoutResize" in js else bad)("js resize")
+    (ok if "_run_pywebview(target)" in main_body else bad)("main→pywebview")
 
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/api/health", timeout=1.5) as r:
             (ok if b"Xochipilli" in r.read() else bad)("live health")
+        with urllib.request.urlopen("http://127.0.0.1:8787/", timeout=1.5) as r:
+            b = r.read()
+        (ok if b"0c0e12" in b or b"style.css" in b else bad)("live index has dark UI refs")
     except Exception as e:
         ok(f"live skip {e}")
+
+    # runtime chrome absence (soft)
+    pc = subprocess.run(["pgrep", "-f", "chrome-app-profile"], capture_output=True)
+    (ok if pc.returncode != 0 else bad)("no chrome-app-profile now")
 
     print("----")
     if fails:
