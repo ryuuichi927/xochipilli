@@ -12,6 +12,7 @@ data/canva_pkce.json
 
 # User project media (never push personal works)
 data/projects/
+data/user/
 data/**/*.wav
 data/**/*.aif
 data/**/*.aiff

@@ -37,4 +37,5 @@ if [[ "${VIDEO_PROVIDER}" == "xai" || "${VIDEO_PROVIDER}" == "grok" ]]; then
   echo "XAI_VIDEO_MODEL=${XAI_VIDEO_MODEL:-grok-imagine-video}"
 fi
 
-exec env -u PYTHONPATH "$ROOT/.venv/bin/python" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --app-dir "$ROOT"
+# app.server registers craft/taste routes on top of app.main
+exec env -u PYTHONPATH "$ROOT/.venv/bin/python" -m uvicorn app.server:app --host 127.0.0.1 --port "$PORT" --app-dir "$ROOT"
