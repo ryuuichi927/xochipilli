@@ -43,6 +43,11 @@ int main(int argc, char **argv) {
     unsetenv("PYTHONHOME");
     setenv("PYTHONUNBUFFERED", "1", 1);
     setenv("PYTHONDONTWRITEBYTECODE", "1", 1);
+    /* Dock launches often leave C locale → Python print crashes on JA paths */
+    setenv("PYTHONIOENCODING", "utf-8", 1);
+    setenv("LANG", "en_US.UTF-8", 0);
+    setenv("LC_ALL", "en_US.UTF-8", 0);
+    setenv("LC_CTYPE", "en_US.UTF-8", 0);
 
     /* Dock launches swallow stdout — force session log */
     {

@@ -70,8 +70,16 @@ Personalization and segment craft controls for Xochipilli.
 
 ```bash
 ./RUN_ME.sh          # app.server:app（Craft 込み）
-./RUN_DESKTOP.sh
+./RUN_DESKTOP.sh     # Dock / pywebview — Craft は first paint 後に動的ロード
 ```
+
+### Desktop shell (0.2.0)
+
+Craft is a **standard product feature** in the Dock window, not browser-only.
+
+- Backend: `app.server` registers craft routes (unchanged).
+- UI: `static/craft_ui.js` is injected **after first paint** by the desktop shell (`loadCraft` / `__XOCHI_CRAFT`) so WKWebView does not white-screen on sync `<script src=craft_ui.js>`.
+- Browser path still loads craft from `index.html` as a normal script tag.
 
 ## Taste storage
 

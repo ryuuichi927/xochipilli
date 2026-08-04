@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -36,6 +37,19 @@ from .program_export import build_program_mp4
 load_dotenv(ROOT / ".env", override=False)
 
 app = FastAPI(title="Xochipilli", version="0.1.0-d1")
+
+# Desktop shell uses pywebview load_html → document origin is often "null" / about:blank
+# while API is http://127.0.0.1:PORT. Without CORS, fetch() fails silently in WK and
+# the UI never lists projects (e.g. Bonji Story) or completes import.
+# Local-only tool: open to any Origin including null.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 # Prevent double-submit races (same segment generate twice)
 _GEN_LOCKS: set[str] = set()

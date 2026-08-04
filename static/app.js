@@ -3,6 +3,42 @@
 const $ = (id) => document.getElementById(id);
 const LANG_KEY = "mfw.lang";
 
+/**
+ * Desktop shell (pywebview load_html) often has document URL about:blank.
+ * Relative "/api/..." then fails. Prefer window.__XOCHI_API_BASE__ (injected by
+ * desktop_app) or localhost when protocol is about:.
+ */
+function apiBase() {
+  try {
+    if (typeof window !== "undefined" && window.__XOCHI_API_BASE__) {
+      return String(window.__XOCHI_API_BASE__).replace(/\/$/, "");
+    }
+  } catch (_) {}
+  try {
+    const href = String(location && location.href ? location.href : "");
+    const proto = String(location && location.protocol ? location.protocol : "");
+    if (!proto || proto === "about:" || href === "about:blank" || href.startsWith("about:")) {
+      return "http://127.0.0.1:8787";
+    }
+  } catch (_) {}
+  return "";
+}
+
+function apiUrl(path) {
+  if (path == null || path === "") return path;
+  const s = String(path);
+  if (/^https?:\/\//i.test(s) || s.startsWith("blob:") || s.startsWith("data:")) return s;
+  const base = apiBase();
+  if (!base) return s;
+  return s.startsWith("/") ? base + s : `${base}/${s}`;
+}
+
+// Expose for craft_ui.js and console probes (desktop about:blank shell).
+try {
+  window.apiUrl = apiUrl;
+  window.apiBase = apiBase;
+} catch (_) {}
+
 const state = {
   project: null,
   audioUrl: null,
@@ -532,7 +568,7 @@ async function deleteProjectUi(pid, title) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
+  const res = await fetch(apiUrl(path), opts);
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -648,7 +684,7 @@ function bindAudio(pid, hasSource) {
     audio.load();
     return;
   }
-  audio.src = `/api/projects/${pid}/audio?t=${Date.now()}`;
+  audio.src = apiUrl(`/api/projects/${pid}/audio?t=${Date.now()}`);
   audio.load();
 }
 
@@ -1523,7 +1559,9 @@ function renderSegments() {
     refThumb.className = "ref-thumb" + (s.ref_image ? "" : " hidden");
     refThumb.alt = "";
     if (s.ref_image) {
-      refThumb.src = `/api/projects/${state.project.id}/refs/${encodeURIComponent(s.ref_image)}?t=${Date.now()}`;
+      refThumb.src = apiUrl(
+        `/api/projects/${state.project.id}/refs/${encodeURIComponent(s.ref_image)}?t=${Date.now()}`
+      );
     }
     refRow.appendChild(refThumb);
 
@@ -2153,11 +2191,13 @@ function activeClip(seg) {
 }
 
 function clipUrl(file) {
-  return `/api/projects/${state.project.id}/clips/${encodeURIComponent(file)}?t=${Date.now()}`;
+  return apiUrl(
+    `/api/projects/${state.project.id}/clips/${encodeURIComponent(file)}?t=${Date.now()}`
+  );
 }
 
 function programUrl() {
-  return `/api/projects/${state.project.id}/program?t=${Date.now()}`;
+  return apiUrl(`/api/projects/${state.project.id}/program?t=${Date.now()}`);
 }
 
 function adoptedProgram() {
@@ -2246,7 +2286,7 @@ async function ensureClipBlob(file) {
   if (!file || !state.project) return null;
   if (state.clipBlobCache.has(file)) return state.clipBlobCache.get(file);
   const res = await fetch(
-    `/api/projects/${state.project.id}/clips/${encodeURIComponent(file)}`
+    apiUrl(`/api/projects/${state.project.id}/clips/${encodeURIComponent(file)}`)
   );
   if (!res.ok) throw new Error(`clip fetch ${res.status}`);
   const blob = await res.blob();

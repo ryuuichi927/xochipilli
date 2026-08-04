@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop shell contracts: stock webview + in-bundle Mach-O launcher."""
+"""Desktop shell contracts: load_html+inline CSS, craft dynamic load, skip inject, Mach-O."""
 
 from __future__ import annotations
 
@@ -32,26 +32,101 @@ def main() -> int:
         bad(f"syntax: {e}")
 
     for n in (
-        "stock pywebview",
         "shell_mode=pywebview",
-        '"url": base',
-        "resizable\": True",
+        'resizable": True',
         "_log_bundle_identity",
         "_kill_legacy_chrome_app",
         "XOCHIPILLI_SHELL",
+        "_build_shell_html",
+        "load_html",
+        "xochi-inline-css",
+        "XOCHIPILLI_SKIP_PYWEBVIEW_INJECT",
+        "setInspectable_",
+        "inject_pywebview SKIPPED",
+        "OPEN_DEVTOOLS_IN_DEBUG",
+        "background_color",
+        "#0c0e12",
+        "__XOCHI_API_BASE__",
+        "app.server:app",
     ):
         (ok if n in desk else bad)(f"has {n}")
+
+    # Craft must not be permanently deferred without a load path.
+    craft_markers = (
+        "loadCraft",
+        "__XOCHI_CRAFT",
+        "craft_ui.js?v=desktop2",
+        "xochi-craft-loader",
+    )
+    if any(m in desk for m in craft_markers):
+        ok("craft dynamic loader path present")
+    else:
+        bad("craft loader missing (need loadCraft / __XOCHI_CRAFT / inject path)")
+
+    if "deferred forever" in desk.lower() or "permanently strip" in desk.lower():
+        # Allow comments that say we do NOT permanently strip.
+        if "not permanently" in desk.lower() or "not stripped forever" in desk.lower():
+            ok("craft not hard-removed (comment only)")
+        elif "deferred: whites" in desk and "loadCraft" not in desk:
+            bad("craft deferred without loader")
+        else:
+            ok("craft strip language checked")
+    else:
+        ok("no permanent craft-strip language")
+
+    # Must actually inject craft after paint, not only comment it out.
+    if "dynamic load" in desk.lower() or "loadCraft" in desk:
+        ok("craft enablement strategy documented in shell")
+    else:
+        bad("no craft enablement strategy in desktop_app")
+
+    if "craft_ui.js" in desk and (
+        "appendChild" in desk or "createElement" in desk or "evaluate_js" in desk
+    ):
+        ok("craft_ui.js injection mechanism present")
+    else:
+        bad("craft_ui.js mentioned but no injection mechanism")
 
     for n in (
         "setContentView_",
         "_patch_cocoa_content_container",
         "_patch_cocoa_early_content_view",
-        "using load_html path",
         "def _open_chromium_app",
         "--app=",
-        "evaluate_js(",
     ):
         (ok if n not in desk else bad)(f"lacks {n}")
+
+    if "_build_shell_html" in desk and "using load_html shell" in desk:
+        ok("load_html shell path present")
+    else:
+        bad("load_html shell path missing")
+
+    # Every webview.start path should keep debug= where possible
+    if "debug=debug" in desk or "debug=debug," in desk:
+        ok("webview.start keeps debug=")
+    else:
+        bad("webview.start debug= missing")
+
+    craft_js = (ROOT / "static/craft_ui.js").read_text(encoding="utf-8")
+    for n in (
+        "function boot",
+        "function scan",
+        "function wireCard",
+        "function openUnmatchUI",
+        "SCAN_DEBOUNCE",
+        "apiUrl",
+        "unmatch-v2",
+        "affect",
+        "episode",
+        "console.error",
+    ):
+        (ok if n in craft_js else bad)(f"craft_ui.js has {n}")
+
+    # Hardened try/catch around boot path
+    if "try {" in craft_js and "craft boot" in craft_js:
+        ok("craft_ui.js boot try/catch")
+    else:
+        bad("craft_ui.js missing boot try/catch hardening")
 
     launcher = ROOT / "Xochipilli.app/Contents/MacOS/Xochipilli"
     if not launcher.is_file():
@@ -76,7 +151,9 @@ def main() -> int:
     (ok if "NSAllowsLocalNetworking" in plist else bad)("plist allows local networking")
 
     csrc = ROOT / "native/xochipilli_launcher.c"
-    (ok if csrc.is_file() and "Py_Initialize" in csrc.read_text() else bad)("native launcher source")
+    (ok if csrc.is_file() and "Py_Initialize" in csrc.read_text() else bad)(
+        "native launcher source"
+    )
 
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/api/health", timeout=1.5) as r:

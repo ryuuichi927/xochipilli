@@ -1,6 +1,14 @@
-/* Craft UI — Unmatch reason sheet + affect sliders (no app.js edit required) */
+/* Craft UI — Unmatch reason sheet + affect sliders (no app.js edit required)
+ *
+ * Desktop shell (pywebview / WKWebView about:blank): loaded dynamically after first
+ * paint via loadCraft / __XOCHI_CRAFT in desktop_app.py — keep this IIFE safe so a
+ * single bad card or missing #segments cannot white the page.
+ */
 (function () {
+  "use strict";
+
   const REASONS = ["emotion", "world", "camera", "style", "episode", "other"];
+  const SCAN_DEBOUNCE_MS = 80;
 
   const I18N = {
     ja: {
@@ -90,13 +98,17 @@
       const saved = localStorage.getItem("mfw.lang");
       if (saved && I18N[saved]) return saved;
     } catch (_) {}
-    const html = (document.documentElement.lang || "").toLowerCase();
-    if (html.startsWith("zh")) return "zh";
-    if (html.startsWith("en")) return "en";
-    if (html.startsWith("ja")) return "ja";
-    const nav = (navigator.language || "ja").toLowerCase();
-    if (nav.startsWith("zh")) return "zh";
-    if (nav.startsWith("en")) return "en";
+    try {
+      const html = (document.documentElement.lang || "").toLowerCase();
+      if (html.startsWith("zh")) return "zh";
+      if (html.startsWith("en")) return "en";
+      if (html.startsWith("ja")) return "ja";
+    } catch (_) {}
+    try {
+      const nav = (navigator.language || "ja").toLowerCase();
+      if (nav.startsWith("zh")) return "zh";
+      if (nav.startsWith("en")) return "en";
+    } catch (_) {}
     return "ja";
   }
 
@@ -127,17 +139,27 @@
   }
 
   function setStatus(msg) {
-    const el = document.getElementById("status");
-    if (el) el.textContent = msg;
+    try {
+      const el = document.getElementById("status");
+      if (el) el.textContent = msg;
+    } catch (_) {}
   }
 
   function pid() {
-    const sel = document.getElementById("projectSelect");
-    return (sel && sel.value) || "";
+    try {
+      const sel = document.getElementById("projectSelect");
+      return (sel && sel.value) || "";
+    } catch (_) {
+      return "";
+    }
   }
 
   async function api(path, opts) {
-    const res = await fetch(path, opts);
+    const url =
+      typeof window.apiUrl === "function"
+        ? window.apiUrl(path)
+        : path;
+    const res = await fetch(url, opts);
     if (!res.ok) {
       let detail = res.statusText;
       try {
@@ -157,8 +179,11 @@
     if (root) return root;
     root = document.createElement("div");
     root.id = "unmatchModal";
+    // Always both class + attribute so CSS display:none !important applies.
     root.className = "unmatch-modal hidden";
     root.hidden = true;
+    root.setAttribute("hidden", "");
+    // Never paint light backgrounds on body/html — modal only.
     root.innerHTML = `
       <div class="unmatch-backdrop" data-unmatch-cancel="1"></div>
       <div class="unmatch-sheet" role="dialog" aria-modal="true">
@@ -178,167 +203,204 @@
   }
 
   function openUnmatchUI(sid) {
-    const projectId = pid();
-    if (!projectId || !sid) return;
-    const root = ensureModal();
-    root.querySelector("#unmatchTitle").textContent = t("btnUnmatch");
-    root.querySelector("#unmatchLead").textContent = t("unmatchWhatDiff");
-    root.querySelector("#unmatchNoteLab").textContent = t("unmatchNoteLab");
-    const note = root.querySelector("#unmatchNote");
-    note.placeholder = t("unmatchNotePh");
-    note.value = "";
-    root.querySelector("#unmatchCancel").textContent = t("btnCancel");
-    root.querySelector("#unmatchOk").textContent = t("unmatchRecord");
-    const epHint = root.querySelector("#unmatchEpHint");
-    epHint.textContent = t("unmatchEpisodeHint");
-    epHint.hidden = true;
+    try {
+      const projectId = pid();
+      if (!projectId || !sid) return;
+      const root = ensureModal();
+      root.querySelector("#unmatchTitle").textContent = t("btnUnmatch");
+      root.querySelector("#unmatchLead").textContent = t("unmatchWhatDiff");
+      root.querySelector("#unmatchNoteLab").textContent = t("unmatchNoteLab");
+      const note = root.querySelector("#unmatchNote");
+      note.placeholder = t("unmatchNotePh");
+      note.value = "";
+      root.querySelector("#unmatchCancel").textContent = t("btnCancel");
+      root.querySelector("#unmatchOk").textContent = t("unmatchRecord");
+      const epHint = root.querySelector("#unmatchEpHint");
+      epHint.textContent = t("unmatchEpisodeHint");
+      epHint.hidden = true;
 
-    const reasonsEl = root.querySelector("#unmatchReasons");
-    reasonsEl.textContent = "";
-    let selected = "other";
-    for (const r of REASONS) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "unmatch-reason-chip" + (r === selected ? " is-on" : "");
-      btn.dataset.reason = r;
-      btn.textContent = t("reason_" + r);
-      btn.onclick = () => {
-        selected = r;
-        reasonsEl.querySelectorAll(".unmatch-reason-chip").forEach((c) => {
-          c.classList.toggle("is-on", c.dataset.reason === selected);
-        });
-        epHint.hidden = selected !== "episode";
-        note.placeholder =
-          selected === "episode" ? t("unmatchNotePhEpisode") : t("unmatchNotePh");
-      };
-      reasonsEl.appendChild(btn);
-    }
-
-    const close = () => {
-      root.classList.add("hidden");
-      root.hidden = true;
-    };
-
-    root.querySelector("#unmatchCancel").onclick = close;
-    root.querySelector("[data-unmatch-cancel]").onclick = close;
-    root.querySelector("#unmatchOk").onclick = async () => {
-      const card = document.querySelector(`.seg-card[data-id="${sid}"]`);
-      const body = {
-        reason: selected,
-        editor_note: note.value || "",
-        editor_keywords: [],
-      };
-      if (card) {
-        const a = card.querySelector('input[data-affect="arousal"]');
-        const v = card.querySelector('input[data-affect="valence"]');
-        if (a && !a.classList.contains("is-unset")) body.arousal = Number(a.value);
-        if (v && !v.classList.contains("is-unset")) body.valence = Number(v.value);
+      const reasonsEl = root.querySelector("#unmatchReasons");
+      reasonsEl.textContent = "";
+      let selected = "other";
+      for (const r of REASONS) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "unmatch-reason-chip" + (r === selected ? " is-on" : "");
+        btn.dataset.reason = r;
+        btn.textContent = t("reason_" + r);
+        btn.onclick = () => {
+          selected = r;
+          reasonsEl.querySelectorAll(".unmatch-reason-chip").forEach((c) => {
+            c.classList.toggle("is-on", c.dataset.reason === selected);
+          });
+          epHint.hidden = selected !== "episode";
+          note.placeholder =
+            selected === "episode" ? t("unmatchNotePhEpisode") : t("unmatchNotePh");
+        };
+        reasonsEl.appendChild(btn);
       }
-      try {
-        await api(`/api/projects/${projectId}/segments/${sid}/unmatch-v2`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        close();
-        setStatus(t("statusUnmatchOk"));
-        const sel = document.getElementById("projectSelect");
-        if (sel) sel.dispatchEvent(new Event("change"));
-      } catch (e) {
-        setStatus(t("statusUnmatchFail", { err: e.message }));
-      }
-    };
 
-    root.classList.remove("hidden");
-    root.hidden = false;
-  }
+      const close = () => {
+        root.classList.add("hidden");
+        root.hidden = true;
+        root.setAttribute("hidden", "");
+      };
 
-  function injectAffect(card) {
-    if (!card || card.querySelector(".affect-row")) return;
-    const sid = card.dataset.id;
-    if (!sid) return;
-    const row = document.createElement("div");
-    row.className = "affect-row";
-    const title = document.createElement("div");
-    title.className = "mini affect-title";
-    title.textContent = t("affectTitle");
-    row.appendChild(title);
-
-    function mk(key, min, max, step, left, right) {
-      const wrap = document.createElement("div");
-      wrap.className = "affect-slider-wrap";
-      const ends = document.createElement("div");
-      ends.className = "affect-ends";
-      ends.innerHTML = `<span>${left}</span><span>${right}</span>`;
-      const input = document.createElement("input");
-      input.type = "range";
-      input.min = String(min);
-      input.max = String(max);
-      input.step = String(step);
-      input.value = String((min + max) / 2);
-      input.dataset.affect = key;
-      input.classList.add("is-unset");
-      input.addEventListener("input", () => input.classList.remove("is-unset"));
-      input.addEventListener("change", async () => {
-        const projectId = pid();
-        if (!projectId) return;
-        const body =
-          key === "arousal"
-            ? { arousal: Number(input.value) }
-            : { valence: Number(input.value) };
+      root.querySelector("#unmatchCancel").onclick = close;
+      root.querySelector("[data-unmatch-cancel]").onclick = close;
+      root.querySelector("#unmatchOk").onclick = async () => {
         try {
-          await api(`/api/projects/${projectId}/segments/${sid}/affect`, {
-            method: "PUT",
+          const card = document.querySelector(`.seg-card[data-id="${sid}"]`);
+          const body = {
+            reason: selected,
+            editor_note: note.value || "",
+            editor_keywords: [],
+          };
+          if (card) {
+            const a = card.querySelector('input[data-affect="arousal"]');
+            const v = card.querySelector('input[data-affect="valence"]');
+            if (a && !a.classList.contains("is-unset")) body.arousal = Number(a.value);
+            if (v && !v.classList.contains("is-unset")) body.valence = Number(v.value);
+          }
+          await api(`/api/projects/${projectId}/segments/${sid}/unmatch-v2`, {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           });
-          input.classList.remove("is-unset");
-          setStatus(t("statusAffectSaved"));
+          close();
+          setStatus(t("statusUnmatchOk"));
+          const sel = document.getElementById("projectSelect");
+          if (sel) sel.dispatchEvent(new Event("change"));
         } catch (e) {
-          setStatus(t("statusAffectFail", { err: e.message }));
+          setStatus(t("statusUnmatchFail", { err: (e && e.message) || String(e) }));
         }
-      });
-      wrap.appendChild(ends);
-      wrap.appendChild(input);
-      return wrap;
+      };
+
+      root.classList.remove("hidden");
+      root.hidden = false;
+      root.removeAttribute("hidden");
+    } catch (e) {
+      console.error("craft openUnmatchUI", e);
     }
+  }
 
-    row.appendChild(mk("arousal", 0, 1, 0.05, t("affectQuiet"), t("affectMoving")));
-    row.appendChild(mk("valence", -1, 1, 0.05, t("affectLow"), t("affectBright")));
+  function injectAffect(card) {
+    try {
+      if (!card || card.querySelector(".affect-row")) return;
+      const sid = card.dataset.id;
+      if (!sid) return;
+      const row = document.createElement("div");
+      row.className = "affect-row";
+      const title = document.createElement("div");
+      title.className = "mini affect-title";
+      title.textContent = t("affectTitle");
+      row.appendChild(title);
 
-    const modeRow = card.querySelector(".mode-row");
-    if (modeRow) modeRow.insertAdjacentElement("afterend", row);
-    else {
-      const ta = card.querySelector("textarea");
-      if (ta) ta.insertAdjacentElement("afterend", row);
-      else card.appendChild(row);
+      function mk(key, min, max, step, left, right) {
+        const wrap = document.createElement("div");
+        wrap.className = "affect-slider-wrap";
+        const ends = document.createElement("div");
+        ends.className = "affect-ends";
+        ends.innerHTML = `<span>${left}</span><span>${right}</span>`;
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = String(min);
+        input.max = String(max);
+        input.step = String(step);
+        input.value = String((min + max) / 2);
+        input.dataset.affect = key;
+        input.classList.add("is-unset");
+        input.addEventListener("input", () => input.classList.remove("is-unset"));
+        input.addEventListener("change", async () => {
+          try {
+            const projectId = pid();
+            if (!projectId) return;
+            const body =
+              key === "arousal"
+                ? { arousal: Number(input.value) }
+                : { valence: Number(input.value) };
+            await api(`/api/projects/${projectId}/segments/${sid}/affect`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            input.classList.remove("is-unset");
+            setStatus(t("statusAffectSaved"));
+          } catch (e) {
+            setStatus(t("statusAffectFail", { err: (e && e.message) || String(e) }));
+          }
+        });
+        wrap.appendChild(ends);
+        wrap.appendChild(input);
+        return wrap;
+      }
+
+      row.appendChild(mk("arousal", 0, 1, 0.05, t("affectQuiet"), t("affectMoving")));
+      row.appendChild(mk("valence", -1, 1, 0.05, t("affectLow"), t("affectBright")));
+
+      const modeRow = card.querySelector(".mode-row");
+      if (modeRow) modeRow.insertAdjacentElement("afterend", row);
+      else {
+        const ta = card.querySelector("textarea");
+        if (ta) ta.insertAdjacentElement("afterend", row);
+        else card.appendChild(row);
+      }
+    } catch (e) {
+      console.error("craft injectAffect", e);
     }
   }
 
   function wireCard(card) {
-    injectAffect(card);
-    const actions = card.querySelector(".seg-actions");
-    if (!actions) return;
-    const unBtn = actions.querySelector("button:not(.primary):not(.ghost):not(.danger)");
-    if (unBtn) {
-      unBtn.textContent = t("btnUnmatch");
-      if (actions.dataset.craftUnmatch !== "1") {
-        actions.dataset.craftUnmatch = "1";
-        unBtn.addEventListener(
-          "click",
-          (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            openUnmatchUI(card.dataset.id);
-          },
-          true
-        );
+    try {
+      if (!card) return;
+      injectAffect(card);
+      const actions = card.querySelector(".seg-actions");
+      if (!actions) return;
+      const unBtn = actions.querySelector("button:not(.primary):not(.ghost):not(.danger)");
+      if (unBtn) {
+        unBtn.textContent = t("btnUnmatch");
+        if (actions.dataset.craftUnmatch !== "1") {
+          actions.dataset.craftUnmatch = "1";
+          unBtn.addEventListener(
+            "click",
+            (ev) => {
+              try {
+                ev.preventDefault();
+                ev.stopPropagation();
+                openUnmatchUI(card.dataset.id);
+              } catch (e) {
+                console.error("craft unmatch click", e);
+              }
+            },
+            true
+          );
+        }
       }
+    } catch (e) {
+      console.error("craft wireCard", e);
     }
   }
 
   function scan() {
-    document.querySelectorAll(".seg-card").forEach(wireCard);
+    try {
+      const cards = document.querySelectorAll(".seg-card");
+      cards.forEach(wireCard);
+    } catch (e) {
+      console.error("craft scan", e);
+    }
+  }
+
+  let _scanTimer = null;
+  function scanDebounced() {
+    if (_scanTimer != null) {
+      try {
+        clearTimeout(_scanTimer);
+      } catch (_) {}
+    }
+    _scanTimer = setTimeout(() => {
+      _scanTimer = null;
+      scan();
+    }, SCAN_DEBOUNCE_MS);
   }
 
   function syncLangFromQuery() {
@@ -351,24 +413,39 @@
   }
 
   function boot() {
-    syncLangFromQuery();
-    scan();
-    const host = document.getElementById("segments");
-    if (host) {
-      const mo = new MutationObserver(() => scan());
-      mo.observe(host, { childList: true, subtree: true });
+    try {
+      syncLangFromQuery();
+      scan();
+      // Missing #segments is OK (early shell / empty project) — no-op observer.
+      const host = document.getElementById("segments");
+      if (host) {
+        try {
+          const mo = new MutationObserver(() => scanDebounced());
+          mo.observe(host, { childList: true, subtree: true });
+        } catch (e) {
+          console.error("craft MutationObserver", e);
+        }
+      }
+      try {
+        document.querySelectorAll(".lang-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setTimeout(scan, 0);
+          });
+        });
+      } catch (_) {}
+      window.mfwOpenUnmatch = openUnmatchUI;
+    } catch (e) {
+      console.error("craft boot", e);
     }
-    document.querySelectorAll(".lang-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        setTimeout(scan, 0);
-      });
-    });
-    window.mfwOpenUnmatch = openUnmatchUI;
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => setTimeout(boot, 0));
-  } else {
-    setTimeout(boot, 0);
+  try {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => setTimeout(boot, 0));
+    } else {
+      setTimeout(boot, 0);
+    }
+  } catch (e) {
+    console.error("craft schedule boot", e);
   }
 })();
