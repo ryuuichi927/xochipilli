@@ -273,7 +273,6 @@ def _run_pywebview(target: str) -> int:
         )
         return 1
 
-    # Prefer dark empty frame over pure white while loading
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     webview.settings["ALLOW_FILE_URLS"] = True
 
@@ -281,13 +280,12 @@ def _run_pywebview(target: str) -> int:
     storage.mkdir(parents=True, exist_ok=True)
 
     base = target if target.endswith("/") else target + "/"
-    html = _fetch_index_html()
-    html_abs = _absolutize_html(html, base) if html else None
 
-    # Strategy: load_html with http base_uri so WKWebView origin is the API host.
-    # Fallback: plain url= if html fetch failed.
+    # Single path: native window loads the live FastAPI origin directly.
+    # (Earlier html/load_html races left a white frame and skipped `loaded`.)
     window_kwargs: dict = {
         "title": "Xochipilli",
+        "url": base,
         "width": 1440,
         "height": 900,
         "min_size": (960, 640),
@@ -297,10 +295,6 @@ def _run_pywebview(target: str) -> int:
         "confirm_close": False,
         "focus": True,
     }
-    if html_abs:
-        window_kwargs["html"] = html_abs
-    else:
-        window_kwargs["url"] = base
 
     try:
         window = webview.create_window(**window_kwargs)
@@ -310,52 +304,21 @@ def _run_pywebview(target: str) -> int:
         window = webview.create_window(**window_kwargs)
 
     print("[xochipilli] shell_mode=pywebview", flush=True)
-    _log(f"window created mode={'html' if html_abs else 'url'} → {base}")
-
-    loaded_once = {"ok": False}
+    _log(f"window created url={base}")
 
     def _on_shown() -> None:
         _log("event shown")
         _activate_cocoa()
-        # Ensure base URL for relative /api fetches if html path used without working base
-        if html_abs:
-            try:
-                # inject <base> if missing and force navigation if body empty
-                window.evaluate_js(
-                    f"""
-                    (function() {{
-                      if (!document.querySelector('base')) {{
-                        var b = document.createElement('base');
-                        b.href = {base!r};
-                        document.head.insertBefore(b, document.head.firstChild);
-                      }}
-                      var text = (document.body && document.body.innerText || '').trim();
-                      if (!text || text.length < 8) {{
-                        location.replace({base!r});
-                      }}
-                      return document.body ? document.body.innerText.slice(0,40) : 'no-body';
-                    }})()
-                    """
-                )
-            except Exception as e:
-                _log(f"shown evaluate_js: {e}")
-                try:
-                    window.load_url(base)
-                    _log(f"fallback load_url {base}")
-                except Exception as e2:
-                    _log(f"load_url failed: {e2}")
 
     def _on_loaded() -> None:
-        loaded_once["ok"] = True
         _log("event loaded")
         try:
             snippet = window.evaluate_js(
-                "(document.body && (document.body.innerText||'').trim().slice(0,60)) || ''"
+                "(document.body && (document.body.innerText||'').trim().slice(0,80)) || ''"
             )
             _log(f"dom snippet={snippet!r}")
-            # If still blank after load, hard navigate
             if not snippet or len(str(snippet).strip()) < 4:
-                _log("blank DOM after loaded → load_url")
+                _log("blank DOM → reload url")
                 window.load_url(base)
         except Exception as e:
             _log(f"loaded check: {e}")
@@ -366,46 +329,16 @@ def _run_pywebview(target: str) -> int:
     except Exception as e:
         _log(f"events hook skipped: {e}")
 
-    # After GUI loop is up, apply base_uri load_html (more reliable on cocoa than create html=)
     def _boot() -> None:
-        time.sleep(0.15)
+        time.sleep(0.05)
         _activate_cocoa()
-        if html_abs:
-            try:
-                window.load_html(html_abs, base_uri=base)
-                _log(f"load_html base_uri={base} bytes={len(html_abs)}")
-            except TypeError:
-                try:
-                    window.load_html(html_abs)
-                    _log(f"load_html (no base_uri) bytes={len(html_abs)}")
-                except Exception as e:
-                    _log(f"load_html failed: {e}")
-                    try:
-                        window.load_url(base)
-                    except Exception as e2:
-                        _log(f"load_url failed: {e2}")
-            except Exception as e:
-                _log(f"load_html failed: {e}")
-                try:
-                    window.load_url(base)
-                    _log(f"load_url {base}")
-                except Exception as e2:
-                    _log(f"load_url failed: {e2}")
-        else:
-            try:
-                window.load_url(base)
-                _log(f"load_url {base}")
-            except Exception as e:
-                _log(f"load_url failed: {e}")
-
-        # Second chance if still blank
-        time.sleep(1.2)
-        if not loaded_once["ok"]:
-            _log("no loaded event yet → force load_url")
-            try:
-                window.load_url(base)
-            except Exception as e:
-                _log(f"force load_url failed: {e}")
+        # Soft reload once after show (helps WKWebView first paint on some macOS builds)
+        try:
+            time.sleep(0.4)
+            window.load_url(base)
+            _log(f"boot load_url {base}")
+        except Exception as e:
+            _log(f"boot load_url failed: {e}")
 
     try:
         webview.start(
@@ -420,7 +353,7 @@ def _run_pywebview(target: str) -> int:
             webview.start(func=_boot, private_mode=False, storage_path=str(storage))
         except TypeError:
             try:
-                webview.start(func=_boot, private_mode=False)
+                webview.start(private_mode=False)
             except TypeError:
                 webview.start()
     except Exception:
