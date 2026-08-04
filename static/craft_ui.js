@@ -51,7 +51,7 @@
       statusUnmatchFail: "Unmatch failed: {err}",
       statusAffectSaved: "Feel saved",
       statusAffectFail: "Feel save failed: {err}",
-      btnUnmatch: "Unmatch",
+      btnUnmatch: "Doesn't match",
     },
     zh: {
       unmatchWhatDiff: "哪里不对？",
@@ -80,26 +80,49 @@
     },
   };
 
+  /** Align with app.js detectLang + ?lang= + <html lang> */
   function lang() {
     try {
-      const s = localStorage.getItem("mfw.lang");
-      if (s && I18N[s]) return s;
+      const q = new URLSearchParams(location.search).get("lang");
+      if (q && I18N[q]) return q;
     } catch (_) {}
+    try {
+      const saved = localStorage.getItem("mfw.lang");
+      if (saved && I18N[saved]) return saved;
+    } catch (_) {}
+    const html = (document.documentElement.lang || "").toLowerCase();
+    if (html.startsWith("zh")) return "zh";
+    if (html.startsWith("en")) return "en";
+    if (html.startsWith("ja")) return "ja";
+    const nav = (navigator.language || "ja").toLowerCase();
+    if (nav.startsWith("zh")) return "zh";
+    if (nav.startsWith("en")) return "en";
     return "ja";
   }
 
+  /** Own strings first so chips never mix packs */
+  const OWN_PREFIX = ["reason_", "affect", "unmatch", "statusUnmatch", "statusAffect", "btnUnmatch", "btnCancel"];
+
+  function isOwnKey(key) {
+    return OWN_PREFIX.some((p) => key === p || key.startsWith(p));
+  }
+
   function t(key, vars) {
-    if (window.MFW_I18N && window.MFW_I18N.strings) {
-      const L = lang();
+    const L = lang();
+    let s = null;
+    if (isOwnKey(key)) {
+      s = (I18N[L] || I18N.ja)[key] || I18N.ja[key];
+    }
+    if (s == null && window.MFW_I18N && window.MFW_I18N.strings) {
       const pack = window.MFW_I18N.strings[L] || window.MFW_I18N.strings.ja || {};
-      if (pack[key] != null) {
-        let s = pack[key];
-        if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v));
-        return s;
+      if (pack[key] != null) s = pack[key];
+    }
+    if (s == null) s = (I18N[L] || I18N.ja)[key] || I18N.ja[key] || key;
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) {
+        s = String(s).split(`{${k}}`).join(String(v));
       }
     }
-    let s = (I18N[lang()] || I18N.ja)[key] || I18N.ja[key] || key;
-    if (vars) for (const [k, v] of Object.entries(vars)) s = String(s).split(`{${k}}`).join(String(v));
     return s;
   }
 
@@ -185,7 +208,8 @@
           c.classList.toggle("is-on", c.dataset.reason === selected);
         });
         epHint.hidden = selected !== "episode";
-        note.placeholder = selected === "episode" ? t("unmatchNotePhEpisode") : t("unmatchNotePh");
+        note.placeholder =
+          selected === "episode" ? t("unmatchNotePhEpisode") : t("unmatchNotePh");
       };
       reasonsEl.appendChild(btn);
     }
@@ -258,7 +282,10 @@
       input.addEventListener("change", async () => {
         const projectId = pid();
         if (!projectId) return;
-        const body = key === "arousal" ? { arousal: Number(input.value) } : { valence: Number(input.value) };
+        const body =
+          key === "arousal"
+            ? { arousal: Number(input.value) }
+            : { valence: Number(input.value) };
         try {
           await api(`/api/projects/${projectId}/segments/${sid}/affect`, {
             method: "PUT",
@@ -291,19 +318,22 @@
   function wireCard(card) {
     injectAffect(card);
     const actions = card.querySelector(".seg-actions");
-    if (!actions || actions.dataset.craftUnmatch === "1") return;
-    actions.dataset.craftUnmatch = "1";
+    if (!actions) return;
     const unBtn = actions.querySelector("button:not(.primary):not(.ghost):not(.danger)");
     if (unBtn) {
-      unBtn.addEventListener(
-        "click",
-        (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          openUnmatchUI(card.dataset.id);
-        },
-        true
-      );
+      unBtn.textContent = t("btnUnmatch");
+      if (actions.dataset.craftUnmatch !== "1") {
+        actions.dataset.craftUnmatch = "1";
+        unBtn.addEventListener(
+          "click",
+          (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openUnmatchUI(card.dataset.id);
+          },
+          true
+        );
+      }
     }
   }
 
@@ -311,13 +341,28 @@
     document.querySelectorAll(".seg-card").forEach(wireCard);
   }
 
+  function syncLangFromQuery() {
+    try {
+      const q = new URLSearchParams(location.search).get("lang");
+      if (q && I18N[q]) {
+        localStorage.setItem("mfw.lang", q);
+      }
+    } catch (_) {}
+  }
+
   function boot() {
+    syncLangFromQuery();
     scan();
     const host = document.getElementById("segments");
     if (host) {
       const mo = new MutationObserver(() => scan());
       mo.observe(host, { childList: true, subtree: true });
     }
+    document.querySelectorAll(".lang-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setTimeout(scan, 0);
+      });
+    });
     window.mfwOpenUnmatch = openUnmatchUI;
   }
 
