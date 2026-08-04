@@ -19,6 +19,9 @@ from .video_gen import (
     extract_audio_segment,
     extract_last_frame,
     generate_clip,
+    probe_duration,
+    xai_chain_mode,
+    xfade_seconds,
 )
 from .digest import digest_audio, segment_features
 from .emotion import emotion_keywords
@@ -93,13 +96,17 @@ def _normalize_resolution(raw: str | None) -> str:
     return "720p"
 
 
-@app.get("/api/health")
-def health():
+def _provider_name() -> str:
     provider = (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip()
     if provider in {"grok", "grok-imagine", "xai-oauth", "imagine"}:
-        provider = "xai"
+        return "xai"
+    return provider
+
+
+@app.get("/api/health")
+def health():
+    provider = _provider_name()
     fal_set = bool(os.environ.get("FAL_KEY") or os.environ.get("FAL_API_KEY"))
-    # split name so editors/redactors never mangle the JSON key
     fal_flag_key = "fal_" + "key_configured"
     xai_res = _normalize_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
     xai_aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
@@ -124,6 +131,8 @@ def health():
         "xai_aspect": xai_aspect if provider == "xai" else None,
         "xai_resolution_choices": ["480p", "720p", "1080p"],
         "clip_unit_seconds": unit,
+        "xai_chain_mode": xai_chain_mode() if provider == "xai" else None,
+        "xfade_seconds": xfade_seconds(),
     }
     if provider == "xai":
         out["video_model"] = out["xai_model"]
@@ -179,8 +188,6 @@ def api_patch_project(pid: str, body: WorldBody):
 
 @app.delete("/api/projects/{pid}")
 def api_delete_project(pid: str):
-    """Delete project folder under data/projects/<id>/ (json + media + clips)."""
-    # prevent path tricks
     safe = Path(str(pid)).name
     if safe != pid or ".." in pid or "/" in pid or "\\" in pid:
         raise HTTPException(400, "invalid project id")
@@ -194,7 +201,6 @@ def api_delete_project(pid: str):
 
 @app.post("/api/projects/{pid}/reveal")
 def api_reveal_project(pid: str):
-    """Reveal project directory in Finder (macOS) / file manager."""
     import subprocess
     import sys
 
@@ -224,13 +230,8 @@ def api_reveal_project(pid: str):
 
 @app.put("/api/projects/{pid}/restore")
 def api_restore_project(pid: str, body: ProjectRestoreBody):
-    """Replace editable project fields from an undo/redo snapshot.
-
-    Keeps id, source audio, digest, and on-disk clip files.
-    """
     p = _proj(pid)
     segs = body.segments if isinstance(body.segments, list) else []
-    # light sanitize
     clean = []
     for s in segs:
         if not isinstance(s, dict) or not s.get("id"):
@@ -254,14 +255,12 @@ async def api_import(pid: str, file: UploadFile = File(...)):
     pdir = storage.project_dir(pid)
     pdir.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
-    # normalize odd suffixes
     if suffix.lower() == ".aiff":
         suffix = ".aiff"
     raw_path = pdir / f"source{suffix}"
     with raw_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Drop previous source.* siblings so only the active import remains.
     for old in pdir.glob("source*"):
         if old.is_file() and old.resolve() != raw_path.resolve():
             try:
@@ -269,17 +268,14 @@ async def api_import(pid: str, file: UploadFile = File(...)):
             except OSError:
                 pass
 
-    # Re-import resets the timeline: clear segment media + program stitch.
     storage.clear_project_media(pid)
     p["program"] = None
 
     digest = digest_audio(raw_path, pdir)
-    # Prefer real filename stem over leftover "Untitled"
     stem = Path(file.filename or "track").stem.strip() or "track"
     if not p.get("title") or str(p.get("title")).strip() in {"", "Untitled"}:
         p["title"] = stem
     p["source_audio"] = raw_path.name
-    # digest_audio already wrote digest.json (with series). Keep project.json light.
     storage.write_digest_file(pid, digest)
     p["digest"] = {
         "theory_id": digest["theory_id"],
@@ -302,7 +298,6 @@ def api_audio(pid: str):
         raise HTTPException(404, "no audio")
     path = storage.project_dir(pid) / name
     if not path.exists():
-        # fall back analysis wav
         aw = storage.project_dir(pid) / "analysis.wav"
         if aw.exists():
             return FileResponse(aw, media_type="audio/wav")
@@ -380,7 +375,6 @@ def api_seg_prompt(pid: str, sid: str, body: SegmentPromptBody):
 
 @app.put("/api/projects/{pid}/segments/{sid}/camera-lock")
 def api_seg_camera_lock(pid: str, sid: str, body: CameraLockBody):
-    """Per-segment hard camera lock for the next generate (and prompt compose)."""
     p = _proj(pid)
     for s in p["segments"]:
         if s["id"] == sid:
@@ -392,7 +386,6 @@ def api_seg_camera_lock(pid: str, sid: str, body: CameraLockBody):
 
 @app.post("/api/projects/{pid}/segments/{sid}/ref-image")
 async def api_seg_ref_image(pid: str, sid: str, file: UploadFile = File(...)):
-    """Attach a still image used as i2v start frame on next generate (beats auto chain)."""
     p = _proj(pid)
     seg = next((s for s in p["segments"] if s["id"] == sid), None)
     if not seg:
@@ -400,7 +393,6 @@ async def api_seg_ref_image(pid: str, sid: str, file: UploadFile = File(...)):
     raw_name = file.filename or "ref.jpg"
     ext = Path(raw_name).suffix.lower()
     if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-        # sniff from content-type
         ct = (file.content_type or "").lower()
         if "png" in ct:
             ext = ".png"
@@ -417,7 +409,6 @@ async def api_seg_ref_image(pid: str, sid: str, file: UploadFile = File(...)):
         raise HTTPException(400, "image too large (max 20MB)")
     refs = storage.project_dir(pid) / "refs"
     refs.mkdir(parents=True, exist_ok=True)
-    # remove previous
     old = seg.get("ref_image")
     if old:
         prev = refs / Path(str(old)).name
@@ -473,7 +464,6 @@ def api_ref_file(pid: str, name: str):
 
 @app.put("/api/projects/{pid}/segments/{sid}/times")
 def api_seg_times(pid: str, sid: str, body: SegmentTimesBody):
-    """Resize segment by dragging edges. Recalculates digest features for the window."""
     p = _proj(pid, with_series=True)
     dig = p.get("digest") or {}
     dur = float((dig.get("global") or {}).get("duration_sec") or 0)
@@ -481,7 +471,6 @@ def api_seg_times(pid: str, sid: str, body: SegmentTimesBody):
     t1 = float(body.t1)
     if t1 < t0:
         t0, t1 = t1, t0
-    # minimum length ~80ms
     if t1 - t0 < 0.08:
         t1 = t0 + 0.08
     if dur > 0:
@@ -492,7 +481,6 @@ def api_seg_times(pid: str, sid: str, body: SegmentTimesBody):
             s["t0"] = round(t0, 4)
             s["t1"] = round(t1, 4)
             try:
-                # segment_features expects full digest ({series, global}), not bare series
                 feat = (
                     segment_features(dig, s["t0"], s["t1"])
                     if dig
@@ -564,8 +552,6 @@ async def _api_generate_inner(pid: str, sid: str):
     clips_dir.mkdir(exist_ok=True)
     refs_dir.mkdir(exist_ok=True)
 
-    # 1) User-attached reference image wins
-    # 2) Else previous segment last-frame continuity
     start_image: Path | None = None
     chain = False
     user_ref = False
@@ -605,17 +591,19 @@ async def _api_generate_inner(pid: str, sid: str):
                         start_image = None
                         chain = False
 
-    # Explicit user toggle only — never force-lock just because we chained
     cam_lock = bool(seg.get("camera_lock"))
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
     tags = tags + list(seg.get("emotion_keywords") or [])
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
     unit = clip_unit_seconds()
-    # Split into ~unit-second chunks (last may be shorter)
     n_parts = max(1, int(math.ceil(dur / unit)))
-    # If only slightly over unit, still one part
     if dur <= unit + 0.35:
         n_parts = 1
+
+    provider = _provider_name()
+    want_extension = (
+        provider == "xai" and n_parts > 1 and xai_chain_mode() == "extension"
+    )
 
     clip_id = "c_" + uuid.uuid4().hex[:8]
     out = clips_dir / f"{sid}-{clip_id[2:]}.mp4"
@@ -630,20 +618,21 @@ async def _api_generate_inner(pid: str, sid: str):
     except Exception:
         audio_seg = None
 
-    part_paths: list[Path] = []
+    # i2v parts to hard/xfade-concat; extension keeps a growing full clip in `accum`
+    i2v_parts: list[Path] = []
     subclips: list[dict[str, Any]] = []
     last_meta: dict[str, Any] = {}
     cur_start = start_image
     composed_first = ""
+    accum: Path | None = None
+    modes_used: list[str] = []
 
     for i in range(n_parts):
         part_dur = unit if i < n_parts - 1 else max(1.0, dur - unit * (n_parts - 1))
-        # Keep last part at least ~2s if possible
         if n_parts > 1 and i == n_parts - 1 and part_dur < 2.0 and dur >= 2.0:
             part_dur = max(2.0, dur - unit * (n_parts - 1))
 
         chain_here = bool(cur_start) and (chain or user_ref or i > 0)
-        # HARD LOCK only when user explicitly toggled camera_lock
         lock_here = bool(cam_lock)
 
         composed = compose_video_prompt(
@@ -658,32 +647,76 @@ async def _api_generate_inner(pid: str, sid: str):
             composed_first = composed
 
         part_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}.mp4"
+
+        # Prefer native extension when we already have a growing video ≤14.5s
+        try_ext = (
+            want_extension
+            and i > 0
+            and accum is not None
+            and accum.is_file()
+            and 1.8 <= probe_duration(accum) <= 14.5
+        )
+
+        meta: dict[str, Any]
+        mode = "i2v"
         try:
-            meta = await generate_clip(
-                out_path=part_path,
-                duration=part_dur,
-                user_prompt=seg["prompt"],
-                composed_prompt=composed,
-                tags=tags,
-                audio_segment=None,  # mux only on final if needed
-                start_image=cur_start,
-            )
+            if try_ext:
+                try:
+                    meta = await generate_clip(
+                        out_path=part_path,
+                        duration=part_dur,
+                        user_prompt=seg["prompt"],
+                        composed_prompt=composed,
+                        tags=tags,
+                        audio_segment=None,
+                        start_image=None,
+                        source_video=accum,
+                    )
+                    mode = "extension"
+                except Exception as ext_err:
+                    # Fall back to last-frame I2V for this part
+                    frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-fb.jpg"
+                    try:
+                        extract_last_frame(accum, frame_path)
+                        cur_start = frame_path
+                    except Exception:
+                        pass
+                    meta = await generate_clip(
+                        out_path=part_path,
+                        duration=part_dur,
+                        user_prompt=seg["prompt"],
+                        composed_prompt=composed,
+                        tags=tags,
+                        audio_segment=None,
+                        start_image=cur_start,
+                    )
+                    mode = "i2v-fallback"
+                    last_meta_note = f"extension failed, used i2v: {ext_err}"
+                    meta["note"] = last_meta_note
+            else:
+                meta = await generate_clip(
+                    out_path=part_path,
+                    duration=part_dur,
+                    user_prompt=seg["prompt"],
+                    composed_prompt=composed,
+                    tags=tags,
+                    audio_segment=None,
+                    start_image=cur_start,
+                )
+                mode = str(meta.get("mode") or ("i2v" if cur_start else "t2v"))
         except Exception as e:
-            # Honest failure: do NOT invent a mock take or partial stitch
             raise HTTPException(
                 502,
                 f"映像生成に失敗しました (part {i + 1}/{n_parts}): {e}",
             ) from e
 
-        if meta.get("is_mock") and (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip() not in {
-            "mock",
-            "",
-        }:
-            # Should never happen after honest-failure fix, but guard anyway
-            raise HTTPException(502, f"unexpected mock under real provider (part {i + 1}/{n_parts})")
+        if meta.get("is_mock") and provider not in {"mock", ""}:
+            raise HTTPException(
+                502, f"unexpected mock under real provider (part {i + 1}/{n_parts})"
+            )
 
         last_meta = meta
-        part_paths.append(part_path)
+        modes_used.append(mode)
         subclips.append(
             {
                 "index": i,
@@ -691,30 +724,61 @@ async def _api_generate_inner(pid: str, sid: str):
                 "duration": part_dur,
                 "provider": meta.get("provider"),
                 "model": meta.get("model"),
-                "chained": bool(meta.get("chained") or chain_here),
-                "chain_frame": Path(cur_start).name if cur_start else None,
+                "mode": mode,
+                "chained": bool(meta.get("chained") or chain_here or mode.startswith("extension")),
+                "chain_frame": Path(cur_start).name if cur_start and mode != "extension" else None,
                 "is_mock": bool(meta.get("is_mock")),
             }
         )
 
-        # Next start = near-end frame of this part
-        if i < n_parts - 1 and part_path.is_file():
-            frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-last.jpg"
-            try:
-                extract_last_frame(part_path, frame_path)
-                cur_start = frame_path
-            except Exception:
-                cur_start = None
+        if mode == "extension":
+            # API returned original+extension already stitched
+            accum = part_path
+            # Seed I2V fallback / next frame from the growing clip
+            if i < n_parts - 1:
+                frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-last.jpg"
+                try:
+                    extract_last_frame(part_path, frame_path)
+                    cur_start = frame_path
+                except Exception:
+                    cur_start = None
+        else:
+            # Independent part (t2v / i2v). If we had an extension accum before
+            # this is the first i2v after extension, keep accum as head.
+            if accum is not None and not i2v_parts and mode.startswith("i2v"):
+                # Head is the extension result; this part continues after it
+                i2v_parts.append(accum)
+                accum = None
+            i2v_parts.append(part_path)
+            if i < n_parts - 1 and part_path.is_file():
+                frame_path = clips_dir / f"{sid}-{clip_id[2:]}-p{i:02d}-last.jpg"
+                try:
+                    extract_last_frame(part_path, frame_path)
+                    cur_start = frame_path
+                except Exception:
+                    cur_start = None
+            # Pure extension path keeps only accum; track first part as accum seed
+            if i == 0 and want_extension:
+                accum = part_path
 
-    # Concat if multiple parts
-    if len(part_paths) == 1:
-        if part_paths[0].resolve() != out.resolve():
-            out.write_bytes(part_paths[0].read_bytes())
-    else:
+    # Assemble final output
+    pure_extension = bool(accum) and not i2v_parts
+    if pure_extension and accum is not None:
+        if accum.resolve() != out.resolve():
+            out.write_bytes(accum.read_bytes())
+    elif len(i2v_parts) == 1:
+        if i2v_parts[0].resolve() != out.resolve():
+            out.write_bytes(i2v_parts[0].read_bytes())
+    elif len(i2v_parts) > 1:
         try:
-            concat_video_files(part_paths, out)
+            concat_video_files(i2v_parts, out, xfade=xfade_seconds())
         except Exception as e:
             raise HTTPException(500, f"クリップ連結に失敗しました: {e}") from e
+    elif accum is not None:
+        if accum.resolve() != out.resolve():
+            out.write_bytes(accum.read_bytes())
+    else:
+        raise HTTPException(500, "生成結果が空です")
 
     # Optional: mux segment audio onto final (best-effort)
     if audio_seg and Path(audio_seg).exists() and out.is_file():
@@ -742,6 +806,12 @@ async def _api_generate_inner(pid: str, sid: str):
         if r.returncode == 0 and tmp_mux.is_file():
             tmp_mux.replace(out)
 
+    primary_mode = (
+        "extension"
+        if pure_extension
+        else ("hybrid" if "extension" in modes_used and any(m.startswith("i2v") for m in modes_used) else (modes_used[-1] if modes_used else "t2v"))
+    )
+
     take_n = len(seg.get("clips") or []) + 1
     entry = {
         "id": clip_id,
@@ -754,7 +824,9 @@ async def _api_generate_inner(pid: str, sid: str):
         "auth_source": last_meta.get("auth_source"),
         "model": last_meta.get("model"),
         "resolution": last_meta.get("resolution"),
-        "chained": bool(last_meta.get("chained") or chain or user_ref or n_parts > 1),
+        "chained": bool(
+            last_meta.get("chained") or chain or user_ref or n_parts > 1
+        ),
         "chain_from_segment": (prev.get("id") if chain and prev and not user_ref else None),
         "chain_frame": start_image.name if start_image else None,
         "user_ref_image": bool(user_ref),
@@ -765,6 +837,8 @@ async def _api_generate_inner(pid: str, sid: str):
         "subclips": subclips,
         "duration_requested": dur,
         "is_mock": bool(last_meta.get("is_mock")),
+        "chain_mode": primary_mode,
+        "xfade_seconds": xfade_seconds() if primary_mode in {"i2v", "hybrid", "i2v-fallback"} else 0,
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id
@@ -815,7 +889,6 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
             for c in (s2.get("clips") or [])
         )
 
-    # remove take file + optional chain frame if unused elsewhere
     for field in ("file", "chain_frame"):
         fname = hit.get(field)
         if fname and _unused(fname, field if field == "file" else "chain_frame"):
@@ -832,7 +905,6 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
                 except OSError:
                     pass
 
-    # also clean subclip parts if present
     for sc in hit.get("subclips") or []:
         fname = sc.get("file")
         if fname:
@@ -863,7 +935,6 @@ def api_delete_clip(pid: str, sid: str, clip_id: str):
 
 @app.get("/api/projects/{pid}/clips/{name}")
 def api_clip(pid: str, name: str):
-    # prevent path escape
     safe = Path(name).name
     path = storage.project_dir(pid) / "clips" / safe
     if not path.exists():
@@ -885,7 +956,6 @@ def api_clip(pid: str, name: str):
 
 @app.post("/api/projects/{pid}/program/export")
 def api_program_export(pid: str):
-    """Stitch adopted clips into one program.mp4 (hard cuts + black gaps)."""
     p = _proj(pid)
     pdir = storage.project_dir(pid)
     clips_dir = pdir / "clips"
@@ -940,7 +1010,6 @@ def api_del_seg(pid: str, sid: str):
     p["segments"] = [s for s in p["segments"] if s["id"] != sid]
     if doomed:
         storage.remove_segment_media(pid, doomed, remaining_segments=p["segments"])
-    # program stitch is stale once timeline changes
     if p.get("program"):
         storage.remove_program_file(pid)
         p["program"] = None
