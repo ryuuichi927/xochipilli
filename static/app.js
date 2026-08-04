@@ -869,10 +869,9 @@ function xRatioToTime(ratio) {
 }
 
 /**
- * True while the user is typing in a text field (prompt, lyrics, world, etc.).
- * Checks both the event target and document.activeElement — WKWebView / focus
- * races sometimes deliver keydown with target=body while the caret is still in
- * a textarea. While typing, ALL editing shortcuts must stay off (esp. Del).
+ * True while the user is editing text (prompt / lyrics / world…).
+ * Does NOT treat range sliders, checkboxes, or buttons as "typing" —
+ * those used to swallow Space/P/… and feel like "keys dead".
  */
 function isTypingTarget(el) {
   const nodes = [];
@@ -885,48 +884,43 @@ function isTypingTarget(el) {
   for (const node of nodes) {
     if (!node || node === document.body || node === document.documentElement) continue;
     const tag = (node.tagName || "").toLowerCase();
-    if (tag === "textarea" || tag === "select") return true;
+    if (tag === "textarea") return true;
+    if (tag === "select") return true;
     if (tag === "input") {
       const type = String(node.type || "text").toLowerCase();
-      // text-like inputs only; skip pure chrome controls
+      // Only real text entry blocks timeline shortcuts.
       if (
         [
-          "button",
-          "submit",
-          "checkbox",
-          "radio",
-          "file",
-          "reset",
-          "range",
-          "color",
-          "image",
-          "hidden",
+          "text",
+          "search",
+          "url",
+          "tel",
+          "email",
+          "password",
+          "number",
+          "",
         ].includes(type)
       ) {
-        // still block destructive shortcuts when a control has focus
-        if (type === "range" || type === "checkbox" || type === "radio" || type === "file") {
-          return true;
-        }
-        continue;
+        return true;
       }
-      return true;
+      continue;
     }
     if (node.isContentEditable) return true;
     try {
-      if (node.closest?.("textarea, select, [contenteditable=''], [contenteditable='true'], [contenteditable=true]")) {
+      if (
+        node.closest?.(
+          "textarea, select, [contenteditable=''], [contenteditable='true'], [contenteditable=true]"
+        )
+      ) {
         return true;
       }
       const inp = node.closest?.("input");
       if (inp) {
         const type = String(inp.type || "text").toLowerCase();
         if (
-          ![
-            "button",
-            "submit",
-            "reset",
-            "image",
-            "hidden",
-          ].includes(type)
+          ["text", "search", "url", "tel", "email", "password", "number", ""].includes(
+            type
+          )
         ) {
           return true;
         }
@@ -942,6 +936,23 @@ function shouldIgnoreGlobalKeys(ev) {
   if (ev.isComposing || ev.keyCode === 229 || ev.key === "Process") return true;
   if (isTypingTarget(ev.target) || isTypingTarget(document.activeElement)) return true;
   return false;
+}
+
+/** After button clicks, return focus to body so Space/P hit shortcuts, not the button. */
+function releaseChromeFocus() {
+  try {
+    const ae = document.activeElement;
+    if (!ae || ae === document.body || ae === document.documentElement) return;
+    const tag = (ae.tagName || "").toLowerCase();
+    if (tag === "button" || tag === "a" || (tag === "input" && ae.type === "button")) {
+      ae.blur();
+    }
+    // range / checkbox: blur too — craft sliders were parking focus and killing keys
+    if (tag === "input") {
+      const type = String(ae.type || "").toLowerCase();
+      if (["range", "checkbox", "radio", "file"].includes(type)) ae.blur();
+    }
+  } catch (_) {}
 }
 
 function togglePlay() {
@@ -984,14 +995,32 @@ function currentFrameStart() {
   return 0;
 }
 
-function segmentAtTime(t) {
-  const segs = state.project?.segments || [];
-  // prefer tightest / last matching if overlap
+function segmentAtTime(tcur, { requireClip = false } = {}) {
+  const segs = [...(state.project?.segments || [])].sort(
+    (a, b) => Number(a.t0) - Number(b.t0)
+  );
   let hit = null;
   for (const s of segs) {
-    if (t >= s.t0 - 1e-4 && t <= s.t1 + 1e-4) hit = s;
+    const t0 = Number(s.t0);
+    const t1 = Number(s.t1);
+    // inclusive band for edit hit-testing (click / K)
+    if (tcur >= t0 - 1e-4 && tcur <= t1 + 1e-4) {
+      if (requireClip && !activeClip(s)) continue;
+      hit = s;
+    }
   }
-  return hit;
+  if (hit) return hit;
+  // tiny tolerance at exact end of last (video sync)
+  if (requireClip) {
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const s = segs[i];
+      if (Math.abs(tcur - Number(s.t1)) < 0.04) {
+        if (!activeClip(s)) continue;
+        return s;
+      }
+    }
+  }
+  return null;
 }
 
 function ensurePlayheadInView(t) {
@@ -1034,6 +1063,20 @@ function playFromFrameStart() {
  */
 function selectSegment(sid, { focusPrompt = false } = {}) {
   state.selectedSegId = sid;
+
+  // Mid-type: never wipe the textarea — only flip highlight classes.
+  if (!focusPrompt && isTypingTarget(document.activeElement)) {
+    try {
+      document.querySelectorAll(".seg-card").forEach((c) => {
+        c.classList.toggle("active", c.dataset.id === sid);
+      });
+      document.querySelectorAll(".seg-band").forEach((b) => {
+        b.classList.toggle("selected", b.dataset.sid === sid);
+      });
+    } catch (_) {}
+    return;
+  }
+
   renderWave();
   renderSegments();
   const el = document.querySelector(`.seg-card[data-id="${sid}"]`);
@@ -2643,29 +2686,6 @@ function applySyncMuteState() {
   });
 }
 
-function segmentAtTime(tcur, { requireClip = true } = {}) {
-  const segs = [...(state.project?.segments || [])].sort(
-    (a, b) => Number(a.t0) - Number(b.t0)
-  );
-  for (const s of segs) {
-    const t0 = Number(s.t0);
-    const t1 = Number(s.t1);
-    if (tcur >= t0 - 0.02 && tcur < t1 - 0.001) {
-      if (requireClip && !activeClip(s)) continue;
-      return s;
-    }
-  }
-  // tiny tolerance at exact end of last adopted
-  for (let i = segs.length - 1; i >= 0; i--) {
-    const s = segs[i];
-    if (Math.abs(tcur - Number(s.t1)) < 0.04) {
-      if (requireClip && !activeClip(s)) continue;
-      return s;
-    }
-  }
-  return null;
-}
-
 function showVideo(seg, clip, { seekAudio = false } = {}) {
   const c = clip || activeClip(seg);
   if (!c?.file || !state.project) return;
@@ -3147,85 +3167,107 @@ async function onWaveClick(ev) {
 
 function onGlobalKeydown(ev) {
   // Prompt / lyrics / world / IME: never treat as timeline commands.
-  // (Del used to delete the whole segment frame while editing text.)
   if (shouldIgnoreGlobalKeys(ev)) return;
 
   const mod = ev.metaKey || ev.ctrlKey;
   // Undo / Redo — ⌘Z / ⌘⇧Z / ⌘Y (Ctrl on non-Mac)
-  // Native text undo stays in the field because we returned above while typing.
   if (mod && !ev.altKey && (ev.key === "z" || ev.key === "Z")) {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     if (ev.shiftKey) redoEdit().catch((e) => setStatus(e.message));
     else undoEdit().catch((e) => setStatus(e.message));
     return;
   }
   if (mod && !ev.altKey && (ev.key === "y" || ev.key === "Y")) {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     redoEdit().catch((e) => setStatus(e.message));
     return;
   }
   if (mod || ev.altKey) return;
 
   const key = ev.key;
+  // Space on a focused <button> would re-click it — always take it for transport.
   if (key === " " || key === "Spacebar") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     togglePlay();
     return;
   }
   if (key === "r" || key === "R") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     seekToStart();
     return;
   }
   if (key === "p" || key === "P") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     placePinAtPlayhead();
     return;
   }
   if (key === "k" || key === "K") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     playFromFrameStart();
     return;
   }
   if (key === "ArrowLeft") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     nudgeSeek(ev.shiftKey ? -1 : -0.1);
     return;
   }
   if (key === "ArrowRight") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     nudgeSeek(ev.shiftKey ? 1 : 0.1);
     return;
   }
   if (key === "+" || key === "=") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     zoomBy(0.82, 0.5);
     return;
   }
   if (key === "-" || key === "_") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     zoomBy(1.22, 0.5);
     return;
   }
   if (key === "Enter") {
-    // Explicit: only Enter (or clicking the textarea) enters prompt edit.
     if (state.selectedSegId) {
       ev.preventDefault();
+      ev.stopPropagation();
       selectSegment(state.selectedSegId, { focusPrompt: true });
     }
     return;
   }
   if (key === "Backspace" || key === "Delete") {
-    // Hard guard: never delete a segment while any text field is active.
     if (shouldIgnoreGlobalKeys(ev)) return;
     if (state.selectedSegId) {
       ev.preventDefault();
+      ev.stopPropagation();
+      releaseChromeFocus();
       deleteSelectedSegment().catch((e) => setStatus(e.message));
     }
     return;
   }
   if (key === "0" && !ev.shiftKey) {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     resetViewFull();
     renderWave();
     setStatus(t("statusZoomReset"));
@@ -3233,16 +3275,22 @@ function onGlobalKeydown(ev) {
   }
   if (key === "l" || key === "L") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     toggleLoopSelected();
     return;
   }
   if (key === "f" || key === "F") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     zoomFitSelected();
     return;
   }
   if (key === "Tab") {
     ev.preventDefault();
+    ev.stopPropagation();
+    releaseChromeFocus();
     selectSegmentByDelta(ev.shiftKey ? -1 : 1);
     return;
   }
@@ -3406,7 +3454,19 @@ function wire() {
       setStatus(t("statusSeek", { t: fmt(tt) }));
     }
   });
-  document.addEventListener("keydown", onGlobalKeydown);
+  document.addEventListener("keydown", onGlobalKeydown, true);
+  // After any click on chrome controls, drop button/slider focus so keys work.
+  document.addEventListener(
+    "pointerup",
+    (ev) => {
+      const t = ev.target;
+      if (!t || typeof t.closest !== "function") return;
+      if (t.closest("button, .seg-actions, .transport, .preview-toolbar, .top-actions")) {
+        requestAnimationFrame(() => releaseChromeFocus());
+      }
+    },
+    true
+  );
   $("btnCancelPin").onclick = async () => {
     if (!state.project) return;
     state.project = await api(`/api/projects/${state.project.id}/pin/cancel`, {

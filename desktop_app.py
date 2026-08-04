@@ -75,6 +75,7 @@ VENV_PY = ROOT / ".venv" / "bin" / "python"
 SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
 CHROME_PROFILE = SUPPORT / "chrome-app-profile"
 SESSION_LOG = Path.home() / "Library/Logs/Xochipilli/session.log"
+_DID_ACTIVATE_COCOA = False
 
 
 def _log(msg: str) -> None:
@@ -347,13 +348,18 @@ def _kill_legacy_chrome_app() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _activate_cocoa() -> None:
+def _activate_cocoa(*, force: bool = False) -> None:
+    """Bring app forward. Default: only once per process (avoids window bounce)."""
+    global _DID_ACTIVATE_COCOA
     try:
+        if _DID_ACTIVATE_COCOA and not force:
+            return
         from AppKit import NSApplication, NSApplicationActivationPolicyRegular
 
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
         app.activateIgnoringOtherApps_(True)
+        _DID_ACTIVATE_COCOA = True
         _log("cocoa activateIgnoringOtherApps")
     except Exception as e:
         _log(f"cocoa activate skipped: {e}")
