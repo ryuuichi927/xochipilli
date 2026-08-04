@@ -6,7 +6,7 @@ from typing import Any
 
 from .paths import THEORY
 
-# Strong camera lock used for continuity chaining and optional UI toggle.
+# Strong camera lock — ONLY when user explicitly enables camera_lock.
 CAMERA_LOCK_TEXT = (
     "CAMERA LOCK — PHYSICALLY LOCKED STATIC SHOT:\n"
     "Physically locked static camera on a heavy tripod. "
@@ -15,7 +15,7 @@ CAMERA_LOCK_TEXT = (
     "Only the subject and environment may animate. Do not change the camera position or angle at all."
 )
 
-# Soft tags that fight a locked camera (filtered when lock/chain is on).
+# Soft tags that fight a locked camera (filtered when lock is on).
 _CAMERA_TAG_RE = re.compile(
     r"camera|pan|tilt|zoom|dolly|push[- ]?in|orbit|tracking shot|long takes",
     re.IGNORECASE,
@@ -105,20 +105,21 @@ def compose_video_prompt(
 ) -> str:
     """Build the final prompt sent to the video provider.
 
-    camera_lock / chain_from_prev:
-        When True, a hard locked-camera block is placed at the top and
-        camera-implying soft_tags are stripped.
-    style:
-        Project-level visual style (hand-drawn look, palette, medium, etc.).
-    negative_prompt:
-        Things to avoid; merged with a small default when locking camera.
+    camera_lock:
+        ONLY when True (user toggle). Hard tripod lock + strip camera soft_tags.
+        Chain alone does NOT force hard lock — intentional camera language in the
+        user prompt must be allowed to win on transition / motion shots.
+    chain_from_prev:
+        Continuity paragraph from previous last-frame (softer than hard lock).
+    style / negative_prompt:
+        Optional project-level style and avoid-list.
     """
-    lock = bool(camera_lock or chain_from_prev)
+    # Hard lock is explicit only — never implied by chain alone.
+    lock = bool(camera_lock)
     c = build_constraints(feat)
     soft_tags = _filter_soft_tags(list(c.get("soft_tags") or []), lock_camera=lock)
     parts: list[str] = []
 
-    # Hard lock first — model pays most attention to the opening instructions.
     if lock:
         parts.append(CAMERA_LOCK_TEXT)
 
@@ -141,11 +142,12 @@ def compose_video_prompt(
             "Cinematic motion; no subtitles; no watermark."
         )
     elif chain_from_prev:
+        # Continuity without forcing a static camera — user prompt may request motion.
         parts.append(
-            "CONTINUITY FROM PREVIOUS SHOT: A still of the exact last frame of the previous clip "
+            "CONTINUITY FROM PREVIOUS SHOT: A still of the previous clip's near-end frame "
             "is provided as the starting image. Begin from that frame and evolve into the new action. "
-            "Keep the camera completely locked (see CAMERA LOCK above). "
-            "Preserve lighting, palette, and spatial logic unless the user prompt clearly resets the world."
+            "Preserve lighting, palette, subject identity, and spatial logic unless the user prompt "
+            "clearly resets the world or changes the camera. Match the energy of the user prompt."
         )
 
     if soft_tags:
@@ -156,7 +158,7 @@ def compose_video_prompt(
 
     neg = (negative_prompt or "").strip()
     if lock:
-        # Always reinforce anti-camera + common style failures under lock.
+        # Reinforce anti-camera only under explicit lock.
         if neg:
             neg = neg + ", " + DEFAULT_NEGATIVE
         else:

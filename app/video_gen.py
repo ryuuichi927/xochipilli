@@ -34,6 +34,9 @@ def generate_mock_clip(
     """
     Local stand-in video so the D1 loop works without a paid video API.
     Colored field + prompt text; optional mux of the segment audio.
+
+    Only used when VIDEO_PROVIDER=mock. Never used as a silent fallback
+    for real provider failures (that lied to the UI).
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(0.5, min(float(duration or 3.0), 30.0))
@@ -127,7 +130,8 @@ def generate_mock_clip(
         "provider": "mock",
         "path": str(out_path),
         "duration": duration,
-        "note": "mock clip — set VIDEO_PROVIDER=fal and FAL_KEY for real gen later",
+        "note": "mock clip — VIDEO_PROVIDER=mock (placeholder only)",
+        "is_mock": True,
     }
 
 
@@ -154,14 +158,14 @@ def extract_audio_segment(src_wav: Path, t0: float, t1: float, dst: Path) -> Pat
 
 
 def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
-    """Grab near-end frame for continuity chaining."""
+    """Grab near-end frame for continuity chaining (slightly before absolute end)."""
     out_jpg.parent.mkdir(parents=True, exist_ok=True)
-    # -sseof seeks from end; fallback to last decoded frame
+    # Prefer a frame ~0.12s before EOF — absolute last is often transitional/noisy
     cmd = [
         "ffmpeg",
         "-y",
         "-sseof",
-        "-0.08",
+        "-0.12",
         "-i",
         str(video_path),
         "-frames:v",
@@ -172,7 +176,6 @@ def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not out_jpg.is_file() or out_jpg.stat().st_size < 100:
-        # better: take last frame via reverse
         cmd2 = [
             "ffmpeg",
             "-y",
@@ -357,7 +360,13 @@ async def generate_fal_clip(prompt: str, duration: float, out_path: Path) -> dic
         vr = await client.get(video_url)
         vr.raise_for_status()
         out_path.write_bytes(vr.content)
-        return {"provider": "fal", "path": str(out_path), "model": model, "url": video_url}
+        return {
+            "provider": "fal",
+            "path": str(out_path),
+            "model": model,
+            "url": video_url,
+            "is_mock": False,
+        }
 
 
 def _xai_video_url_from_body(body: dict) -> str | None:
@@ -507,6 +516,7 @@ async def generate_xai_clip(
         "aspect_ratio": aspect,
         "chained": use_i2v,
         "start_image": str(start_image) if use_i2v else None,
+        "is_mock": False,
     }
 
 
@@ -520,33 +530,26 @@ async def generate_clip(
     audio_segment: Path | None,
     start_image: Path | None = None,
 ) -> dict[str, Any]:
+    """Dispatch to the configured provider.
+
+    CRITICAL: real providers (xai / fal) raise on failure.
+    Mock is ONLY used when VIDEO_PROVIDER=mock.
+    Never silently substitute a color-block mock for a failed real generation.
+    """
     provider = (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip()
     # aliases
     if provider in {"grok", "grok-imagine", "xai-oauth", "imagine"}:
         provider = "xai"
 
     if provider == "fal":
-        try:
-            return await generate_fal_clip(composed_prompt, duration, out_path)
-        except Exception as e:
-            meta = generate_mock_clip(out_path, duration, user_prompt, tags, audio_segment)
-            meta["fal_error"] = str(e)
-            meta["note"] = f"fal failed, used mock: {e}"
-            return meta
+        return await generate_fal_clip(composed_prompt, duration, out_path)
 
     if provider == "xai":
-        try:
-            return await generate_xai_clip(
-                composed_prompt, duration, out_path, start_image=start_image
-            )
-        except Exception as e:
-            meta = generate_mock_clip(out_path, duration, user_prompt, tags, audio_segment)
-            meta["xai_error"] = str(e)
-            meta["note"] = f"xai failed, used mock: {e}"
-            if start_image:
-                meta["chain_attempted"] = True
-            return meta
+        return await generate_xai_clip(
+            composed_prompt, duration, out_path, start_image=start_image
+        )
 
+    # explicit mock provider only
     meta = generate_mock_clip(out_path, duration, user_prompt, tags, audio_segment)
     if start_image:
         meta["chained"] = True
