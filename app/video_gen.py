@@ -15,6 +15,49 @@ def clip_unit_seconds() -> float:
     return max(2.0, min(v, 12.0))
 
 
+def xai_chain_mode() -> str:
+    """How multi-part xAI continuity is done: 'extension' (native) or 'i2v' (last-frame)."""
+    m = (os.environ.get("XAI_CHAIN_MODE") or "extension").lower().strip()
+    if m in {"i2v", "image", "frame", "last-frame", "last_frame"}:
+        return "i2v"
+    return "extension"
+
+
+def xfade_seconds() -> float:
+    """Technical micro-crossfade at hard seams (not cinematic fades).
+
+    Default 0.12s (~3 frames at 24fps). Set XOCHI_XFADE_SEC=0 to disable.
+    """
+    try:
+        v = float(os.environ.get("XOCHI_XFADE_SEC") or "0.12")
+    except ValueError:
+        v = 0.12
+    return max(0.0, min(v, 0.35))
+
+
+def probe_duration(path: Path) -> float:
+    r = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        return 0.0
+    try:
+        return float((r.stdout or "").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
 def _escape_drawtext(s: str) -> str:
     return (
         s.replace("\\", "\\\\")
@@ -31,13 +74,7 @@ def generate_mock_clip(
     tags: list[str],
     audio_segment: Path | None = None,
 ) -> dict[str, Any]:
-    """
-    Local stand-in video so the D1 loop works without a paid video API.
-    Colored field + prompt text; optional mux of the segment audio.
-
-    Only used when VIDEO_PROVIDER=mock. Never used as a silent fallback
-    for real provider failures (that lied to the UI).
-    """
+    """Local stand-in video. Only when VIDEO_PROVIDER=mock."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     duration = max(0.5, min(float(duration or 3.0), 30.0))
     label = (user_prompt or "segment").strip().replace("\n", " ")
@@ -46,7 +83,6 @@ def generate_mock_clip(
     tagline = ", ".join(tags[:4]) if tags else "music-bias"
     text = _escape_drawtext(f"{label} | {tagline}")
 
-    # color from tags
     color = "0x1b2838"
     joined = " ".join(tags).lower()
     if "bright" in joined or "明るい" in joined:
@@ -61,7 +97,6 @@ def generate_mock_clip(
         f"text='{text}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=(h-text_h)/2:"
         f"box=1:boxcolor=black@0.45:boxborderw=16"
     )
-    # fallback font
     if not Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf").exists():
         vf = (
             f"drawtext=text='{text}':fontcolor=white:fontsize=28:"
@@ -88,7 +123,6 @@ def generate_mock_clip(
     ]
     r = subprocess.run(cmd_v, capture_output=True, text=True)
     if r.returncode != 0:
-        # retry without drawtext
         cmd_v2 = [
             "ffmpeg",
             "-y",
@@ -160,7 +194,6 @@ def extract_audio_segment(src_wav: Path, t0: float, t1: float, dst: Path) -> Pat
 def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
     """Grab near-end frame for continuity chaining (slightly before absolute end)."""
     out_jpg.parent.mkdir(parents=True, exist_ok=True)
-    # Prefer a frame ~0.12s before EOF — absolute last is often transitional/noisy
     cmd = [
         "ffmpeg",
         "-y",
@@ -195,8 +228,43 @@ def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
     return out_jpg
 
 
-def concat_video_files(paths: list[Path], out_path: Path) -> Path:
-    """Hard-cut concatenate mp4 parts into one file (re-encode for stable timestamps)."""
+def _normalize_part(path: Path, work: Path, idx: int) -> Path:
+    """Re-encode one part to stable 1280x720@24 for concat/xfade."""
+    out = work / f"norm_{idx:02d}.mp4"
+    r = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(path),
+            "-an",
+            "-vf",
+            "scale=1280:720:force_original_aspect_ratio=decrease,"
+            "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+            "-r",
+            "24",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0 or not out.is_file():
+        raise RuntimeError(f"normalize failed part {idx}: {(r.stderr or '')[-400:]}")
+    return out
+
+
+def concat_video_files(paths: list[Path], out_path: Path, *, xfade: float | None = None) -> Path:
+    """Concatenate mp4 parts. Optional micro-crossfade (technical glue, not cinematic)."""
     if not paths:
         raise ValueError("no parts to concat")
     out_path = Path(out_path)
@@ -207,33 +275,20 @@ def concat_video_files(paths: list[Path], out_path: Path) -> Path:
         return out_path
 
     import tempfile
+    import shutil
 
+    xfade_d = xfade if xfade is not None else xfade_seconds()
     work = Path(tempfile.mkdtemp(prefix="xochi-concat-"))
     try:
-        lst = work / "list.txt"
-        lines = [f"file '{p.resolve()}'" for p in paths]
-        lst.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        tmp = work / "joined.mp4"
-        r = subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                str(lst),
-                "-c",
-                "copy",
-                str(tmp),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if r.returncode != 0 or not tmp.is_file():
-            # re-encode fallback
-            r2 = subprocess.run(
+        norms = [_normalize_part(p, work, i) for i, p in enumerate(paths)]
+
+        if xfade_d <= 0.001 or len(norms) == 1:
+            # hard cut via concat demuxer
+            lst = work / "list.txt"
+            lst.write_text(
+                "\n".join(f"file '{p.resolve()}'" for p in norms) + "\n", encoding="utf-8"
+            )
+            r = subprocess.run(
                 [
                     "ffmpeg",
                     "-y",
@@ -243,20 +298,8 @@ def concat_video_files(paths: list[Path], out_path: Path) -> Path:
                     "0",
                     "-i",
                     str(lst),
-                    "-an",
-                    "-vf",
-                    "scale=1280:720:force_original_aspect_ratio=decrease,"
-                    "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
-                    "-r",
-                    "24",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    "18",
-                    "-pix_fmt",
-                    "yuv420p",
+                    "-c",
+                    "copy",
                     "-movflags",
                     "+faststart",
                     str(out_path),
@@ -264,25 +307,69 @@ def concat_video_files(paths: list[Path], out_path: Path) -> Path:
                 capture_output=True,
                 text=True,
             )
-            if r2.returncode != 0 or not out_path.is_file():
-                raise RuntimeError(
-                    f"ffmpeg concat failed: {(r.stderr or r2.stderr or '')[-600:]}"
+            if r.returncode != 0 or not out_path.is_file():
+                r2 = subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-f",
+                        "concat",
+                        "-safe",
+                        "0",
+                        "-i",
+                        str(lst),
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "veryfast",
+                        "-crf",
+                        "18",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-movflags",
+                        "+faststart",
+                        str(out_path),
+                    ],
+                    capture_output=True,
+                    text=True,
                 )
+                if r2.returncode != 0 or not out_path.is_file():
+                    raise RuntimeError(
+                        f"ffmpeg concat failed: {(r.stderr or r2.stderr or '')[-600:]}"
+                    )
             return out_path
 
-        # clean re-encode for timestamps
-        r3 = subprocess.run(
+        # Micro xfade chain: transition=fade, duration≈0.12s
+        durs = [probe_duration(p) for p in norms]
+        # Build filter_complex
+        # [0][1]xfade=...:offset=d0-xfade[v01]; [v01][2]xfade=...:offset=...
+        inputs: list[str] = []
+        for p in norms:
+            inputs.extend(["-i", str(p)])
+
+        filters: list[str] = []
+        prev_label = "0:v"
+        acc = durs[0]
+        for i in range(1, len(norms)):
+            out_label = f"v{i:02d}" if i < len(norms) - 1 else "vout"
+            offset = max(0.0, acc - xfade_d)
+            filters.append(
+                f"[{prev_label}][{i}:v]xfade=transition=fade:duration={xfade_d:.3f}:offset={offset:.3f}[{out_label}]"
+            )
+            prev_label = out_label
+            acc = acc + durs[i] - xfade_d
+
+        fc = ";".join(filters)
+        r = subprocess.run(
             [
                 "ffmpeg",
                 "-y",
-                "-i",
-                str(tmp),
+                *inputs,
+                "-filter_complex",
+                fc,
+                "-map",
+                "[vout]",
                 "-an",
-                "-vf",
-                "scale=1280:720:force_original_aspect_ratio=decrease,"
-                "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
-                "-r",
-                "24",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -291,6 +378,8 @@ def concat_video_files(paths: list[Path], out_path: Path) -> Path:
                 "18",
                 "-pix_fmt",
                 "yuv420p",
+                "-r",
+                "24",
                 "-movflags",
                 "+faststart",
                 str(out_path),
@@ -298,13 +387,11 @@ def concat_video_files(paths: list[Path], out_path: Path) -> Path:
             capture_output=True,
             text=True,
         )
-        if r3.returncode != 0 or not out_path.is_file():
-            # copy was enough
-            out_path.write_bytes(tmp.read_bytes())
+        if r.returncode != 0 or not out_path.is_file():
+            # fallback hard-cut if xfade graph fails
+            return concat_video_files(paths, out_path, xfade=0.0)
         return out_path
     finally:
-        import shutil
-
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -315,7 +402,6 @@ async def generate_fal_clip(prompt: str, duration: float, out_path: Path) -> dic
     if not key:
         raise RuntimeError("FAL_KEY not set")
 
-    # Generic fal queue endpoint pattern — model id overridable
     model = os.environ.get("FAL_VIDEO_MODEL", "fal-ai/minimax-video")
     url = f"https://queue.fal.run/{model}"
     headers = {"Authorization": f"Key {key}", "Content-Type": "application/json"}
@@ -326,7 +412,6 @@ async def generate_fal_clip(prompt: str, duration: float, out_path: Path) -> dic
         if r.status_code >= 400:
             raise RuntimeError(f"FAL error {r.status_code}: {r.text[:400]}")
         data = r.json()
-        # Some models return sync video url
         video_url = None
         if isinstance(data, dict):
             video_url = (
@@ -335,7 +420,6 @@ async def generate_fal_clip(prompt: str, duration: float, out_path: Path) -> dic
                 else data.get("video_url")
             )
             if not video_url and data.get("response_url"):
-                # poll
                 for _ in range(60):
                     pr = await client.get(data["response_url"], headers=headers)
                     pj = pr.json()
@@ -386,7 +470,6 @@ def _xai_video_url_from_body(body: dict) -> str | None:
 
 
 def _normalize_xai_resolution(raw: str | None) -> str:
-    """Allow 480p / 720p / 1080p. Unknown values fall back to 720p."""
     r = (raw or "720p").strip().lower()
     if r in {"480", "480p"}:
         return "480p"
@@ -397,6 +480,53 @@ def _normalize_xai_resolution(raw: str | None) -> str:
     return "720p"
 
 
+async def _xai_poll_and_download(
+    client: Any,
+    base_url: str,
+    headers: dict[str, str],
+    request_id: str,
+    out_path: Path,
+    timeout_s: int,
+    poll_s: float,
+) -> tuple[str, dict[str, Any]]:
+    import asyncio
+
+    elapsed = 0.0
+    last_status = "queued"
+    done_body: dict[str, Any] = {}
+    while elapsed < timeout_s:
+        pr = await client.get(f"{base_url}/videos/{request_id}", headers=headers, timeout=30.0)
+        if pr.status_code >= 400:
+            raise RuntimeError(f"xAI poll {pr.status_code}: {pr.text[:400]}")
+        done_body = pr.json()
+        last_status = (done_body.get("status") or "").lower()
+        if last_status == "done":
+            break
+        if last_status in {"failed", "error", "expired", "cancelled"}:
+            msg = (
+                ((done_body.get("error") or {}) if isinstance(done_body.get("error"), dict) else {}).get(
+                    "message"
+                )
+                or done_body.get("message")
+                or last_status
+            )
+            raise RuntimeError(f"xAI video {last_status}: {msg}")
+        await asyncio.sleep(poll_s)
+        elapsed += poll_s
+    else:
+        raise RuntimeError(f"xAI video timeout after {timeout_s}s (last={last_status})")
+
+    video_url = _xai_video_url_from_body(done_body)
+    if not video_url:
+        raise RuntimeError(f"xAI done but no video url: {str(done_body)[:400]}")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    vr = await client.get(video_url, timeout=180.0)
+    vr.raise_for_status()
+    out_path.write_bytes(vr.content)
+    return video_url, done_body
+
+
 async def generate_xai_clip(
     prompt: str,
     duration: float,
@@ -404,15 +534,7 @@ async def generate_xai_clip(
     *,
     start_image: Path | None = None,
 ) -> dict[str, Any]:
-    """Grok Imagine video via SuperGrok OAuth (Ben's Tool) or XAI_API_KEY.
-
-    Text-to-video: XAI_VIDEO_MODEL (default grok-imagine-video).
-    Image-to-video (continuity): start_image → XAI_VIDEO_I2V_MODEL
-    (default grok-imagine-video-1.5).
-
-    Resolution: XAI_VIDEO_RESOLUTION = 480p | 720p | 1080p (default 720p).
-    """
-    import asyncio
+    """Grok Imagine T2V / I2V via SuperGrok OAuth or XAI_API_KEY."""
     import base64
     import mimetypes
     import uuid
@@ -426,7 +548,6 @@ async def generate_xai_clip(
     base_url = str(creds["base_url"]).rstrip("/")
     aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
     resolution = _normalize_xai_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
-    # Prefer short units; hard cap 15 for API
     dur = int(max(1, min(round(float(duration or 5)), 15)))
 
     use_i2v = bool(start_image and Path(start_image).is_file())
@@ -470,39 +591,9 @@ async def generate_xai_clip(
         if not request_id:
             raise RuntimeError(f"xAI: no request_id in {str(body)[:300]}")
 
-        elapsed = 0.0
-        last_status = "queued"
-        done_body: dict[str, Any] = {}
-        while elapsed < timeout_s:
-            pr = await client.get(f"{base_url}/videos/{request_id}", headers=headers, timeout=30.0)
-            if pr.status_code >= 400:
-                raise RuntimeError(f"xAI poll {pr.status_code}: {pr.text[:400]}")
-            done_body = pr.json()
-            last_status = (done_body.get("status") or "").lower()
-            if last_status == "done":
-                break
-            if last_status in {"failed", "error", "expired", "cancelled"}:
-                msg = (
-                    ((done_body.get("error") or {}) if isinstance(done_body.get("error"), dict) else {}).get(
-                        "message"
-                    )
-                    or done_body.get("message")
-                    or last_status
-                )
-                raise RuntimeError(f"xAI video {last_status}: {msg}")
-            await asyncio.sleep(poll_s)
-            elapsed += poll_s
-        else:
-            raise RuntimeError(f"xAI video timeout after {timeout_s}s (last={last_status})")
-
-        video_url = _xai_video_url_from_body(done_body)
-        if not video_url:
-            raise RuntimeError(f"xAI done but no video url: {str(done_body)[:400]}")
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        vr = await client.get(video_url, timeout=180.0)
-        vr.raise_for_status()
-        out_path.write_bytes(vr.content)
+        video_url, _ = await _xai_poll_and_download(
+            client, base_url, headers, request_id, out_path, timeout_s, poll_s
+        )
 
     return {
         "provider": "xai",
@@ -516,6 +607,92 @@ async def generate_xai_clip(
         "aspect_ratio": aspect,
         "chained": use_i2v,
         "start_image": str(start_image) if use_i2v else None,
+        "mode": "i2v" if use_i2v else "t2v",
+        "is_mock": False,
+    }
+
+
+async def extend_xai_clip(
+    prompt: str,
+    duration: float,
+    source_video: Path,
+    out_path: Path,
+) -> dict[str, Any]:
+    """Native xAI Video Extension: continue from an existing mp4 (not a still).
+
+    POST /v1/videos/extensions
+    - input video: 2–15s mp4 (data URI ok)
+    - duration: length of NEW portion only (2–10s)
+    - output: original + extension already stitched by the model
+    - model: grok-imagine-video (extension does not use 1.5 I2V model)
+    - resolution follows input, capped 720p by API
+    """
+    import base64
+    import uuid
+
+    import httpx
+
+    from .xai_auth import resolve_xai_credentials
+
+    src = Path(source_video)
+    if not src.is_file() or src.stat().st_size < 1000:
+        raise RuntimeError(f"extend: source video missing or too small: {src}")
+
+    src_dur = probe_duration(src)
+    if src_dur > 0 and src_dur < 1.8:
+        raise RuntimeError(f"extend: source too short ({src_dur:.2f}s); need ≥2s")
+    if src_dur > 15.5:
+        raise RuntimeError(f"extend: source too long ({src_dur:.2f}s); API max 15s")
+
+    # Extension length only — API range 2–10
+    ext_dur = int(max(2, min(round(float(duration or 5)), 10)))
+
+    creds = resolve_xai_credentials()
+    api_key = creds["api_key"]
+    base_url = str(creds["base_url"]).rstrip("/")
+    model = (os.environ.get("XAI_VIDEO_EXTEND_MODEL") or "grok-imagine-video").strip()
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": "Xochipilli/0.1 (local)",
+        "x-idempotency-key": str(uuid.uuid4()),
+    }
+    b64 = base64.b64encode(src.read_bytes()).decode("ascii")
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "duration": ext_dur,
+        "video": {"url": f"data:video/mp4;base64,{b64}"},
+    }
+
+    timeout_s = int(os.environ.get("XAI_VIDEO_TIMEOUT") or "300")
+    poll_s = float(os.environ.get("XAI_VIDEO_POLL") or "5")
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(f"{base_url}/videos/extensions", headers=headers, json=payload)
+        if r.status_code >= 400:
+            raise RuntimeError(f"xAI extend submit {r.status_code}: {r.text[:500]}")
+        body = r.json()
+        request_id = body.get("request_id")
+        if not request_id:
+            raise RuntimeError(f"xAI extend: no request_id in {str(body)[:300]}")
+
+        video_url, _ = await _xai_poll_and_download(
+            client, base_url, headers, request_id, out_path, timeout_s, poll_s
+        )
+
+    return {
+        "provider": "xai",
+        "path": str(out_path),
+        "model": model,
+        "url": video_url,
+        "request_id": request_id,
+        "auth_source": creds.get("source"),
+        "duration": ext_dur,
+        "source_duration": src_dur,
+        "mode": "extension",
+        "chained": True,
         "is_mock": False,
     }
 
@@ -529,15 +706,14 @@ async def generate_clip(
     tags: list[str],
     audio_segment: Path | None,
     start_image: Path | None = None,
+    source_video: Path | None = None,
 ) -> dict[str, Any]:
     """Dispatch to the configured provider.
 
-    CRITICAL: real providers (xai / fal) raise on failure.
-    Mock is ONLY used when VIDEO_PROVIDER=mock.
-    Never silently substitute a color-block mock for a failed real generation.
+    source_video: when set under xai + extension mode, uses native Video Extension.
+    Real providers raise on failure. Mock only when VIDEO_PROVIDER=mock.
     """
     provider = (os.environ.get("VIDEO_PROVIDER") or "mock").lower().strip()
-    # aliases
     if provider in {"grok", "grok-imagine", "xai-oauth", "imagine"}:
         provider = "xai"
 
@@ -545,13 +721,18 @@ async def generate_clip(
         return await generate_fal_clip(composed_prompt, duration, out_path)
 
     if provider == "xai":
+        if source_video and Path(source_video).is_file():
+            return await extend_xai_clip(
+                composed_prompt, duration, Path(source_video), out_path
+            )
         return await generate_xai_clip(
             composed_prompt, duration, out_path, start_image=start_image
         )
 
-    # explicit mock provider only
     meta = generate_mock_clip(out_path, duration, user_prompt, tags, audio_segment)
     if start_image:
         meta["chained"] = True
         meta["note"] = (meta.get("note") or "") + " (mock; continuity frame noted only)"
+    if source_video:
+        meta["mode"] = "extension-mock"
     return meta
