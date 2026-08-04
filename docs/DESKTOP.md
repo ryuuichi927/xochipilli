@@ -48,6 +48,7 @@ window created → http://127.0.0.1:8787
 ## Troubleshooting
 - **Nothing happens:** check the logs above. Try `xattr -cr /Applications/Xochipilli.app` then click again
 - **Dock bounce then die:** confirm MacOS launcher still `exec`s run.sh (not nohup+exit)
+- **White empty window (title only):** WKWebView failed to paint URL. Fixed path uses dark bootstrap + `load_html(..., base_uri=http://127.0.0.1:8787/)`. See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md). Expect `load_html ok` in session.log
 - **Traceback / icon argument:** `desktop_app.py` is patched for pywebview builds without `icon=`
 - **Port clash:** set `PORT=` in `.env`, or free 8787
 - **No pywebview:** `.venv/bin/pip install pywebview`

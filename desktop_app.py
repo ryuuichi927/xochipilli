@@ -201,9 +201,9 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
 
 
 def _activate_cocoa() -> None:
-    """Bring this process to the foreground on macOS (Dock/orphan launches)."""
+    """Bring this process to the foreground on macOS (Dock launches)."""
     try:
-        from AppKit import NSApplication, NSApp, NSApplicationActivationPolicyRegular
+        from AppKit import NSApplication, NSApplicationActivationPolicyRegular
 
         app = NSApplication.sharedApplication()
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
@@ -211,6 +211,84 @@ def _activate_cocoa() -> None:
         print("[xochipilli] cocoa activateIgnoringOtherApps")
     except Exception as e:
         print(f"[xochipilli] cocoa activate skipped: {e}")
+
+
+def _preflight_http() -> tuple[bool, str]:
+    """Confirm the workbench HTML is actually served before opening WebView."""
+    try:
+        with urllib.request.urlopen(f"{URL}/", timeout=2.0) as r:
+            body = r.read()
+            if r.status != 200:
+                return False, f"GET / status={r.status}"
+            if b"<html" not in body.lower() and b"<!DOCTYPE" not in body[:200]:
+                return False, f"GET / not html ({len(body)} bytes)"
+            return True, f"GET / ok ({len(body)} bytes)"
+    except Exception as e:
+        return False, f"GET / failed: {e}"
+
+
+# Dark bootstrap so WKWebView never sits on a blank white document.
+# JS then navigates to the local FastAPI UI after /api/health succeeds.
+_BOOTSTRAP_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xochipilli</title>
+  <style>
+    html, body {
+      margin: 0; height: 100%;
+      background: #0c0e12; color: #c9a227;
+      font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .box { text-align: center; max-width: 28rem; padding: 1.5rem; }
+    .sub { margin-top: .55rem; font-size: 13px; opacity: .72; color: #d8c98a; }
+    .err { margin-top: 1rem; color: #e8a0a0; font-size: 13px; white-space: pre-wrap; }
+    code { font-size: 12px; opacity: .85; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div><strong>Xochipilli</strong></div>
+    <div class="sub" id="status">Connecting to local server…</div>
+    <div class="err" id="err"></div>
+  </div>
+  <script>
+    const targets = ["http://127.0.0.1:8787/", "http://localhost:8787/"];
+    const st = document.getElementById("status");
+    const er = document.getElementById("err");
+    async function probe(base) {
+      const r = await fetch(base + "api/health", { cache: "no-store" });
+      if (!r.ok) throw new Error("health " + r.status);
+      const j = await r.json();
+      if (j && j.ok === false) throw new Error("health not ok");
+      return base;
+    }
+    (async () => {
+      let last = "";
+      for (const t of targets) {
+        try {
+          st.textContent = "Found server at " + t;
+          const base = await probe(t);
+          st.textContent = "Opening workbench…";
+          location.replace(base);
+          return;
+        } catch (e) {
+          last = String(e && e.message ? e.message : e);
+        }
+      }
+      st.textContent = "Local server not reachable";
+      er.textContent =
+        "Start failed or port busy.\\n" +
+        "Tried 127.0.0.1:8787 and localhost:8787\\n" +
+        "Last error: " + last + "\\n\\n" +
+        "Logs: ~/Library/Logs/Xochipilli/session.log";
+    })();
+  </script>
+</body>
+</html>
+"""
 
 
 def main() -> int:
@@ -234,34 +312,104 @@ def main() -> int:
     server = _start_server()
     atexit.register(_stop_server, server)
 
-    if not _health_ok():
-        print("[xochipilli] continuing to open window without healthy API", file=sys.stderr)
+    ok_http, http_msg = _preflight_http()
+    print(f"[xochipilli] preflight: {http_msg}")
+    if not ok_http and not _health_ok():
+        print("[xochipilli] no healthy UI yet; bootstrap page will show error", file=sys.stderr)
 
-    _activate_cocoa()
+    storage = Path.home() / "Library/Application Support/Xochipilli/webview"
+    try:
+        storage.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        storage = Path.home() / "Library/Caches/Xochipilli-webview"
+        storage.mkdir(parents=True, exist_ok=True)
 
+    # Bootstrap first (never pure white). Navigate to FastAPI after health OK.
     window_kwargs = {
         "title": "Xochipilli",
-        "url": URL,
+        "html": _BOOTSTRAP_HTML,
         "width": 1440,
         "height": 900,
         "min_size": (960, 640),
         "background_color": "#0c0e12",
         "text_select": True,
+        "focus": True,
     }
 
     try:
         window = webview.create_window(**window_kwargs)
     except TypeError:
         window_kwargs.pop("text_select", None)
+        window_kwargs.pop("focus", None)
         window = webview.create_window(**window_kwargs)
 
-    print(f"[xochipilli] window created → {URL}")
+    print(f"[xochipilli] window created (bootstrap) → target {URL}/")
 
+    def _fetch_index_html() -> str | None:
+        try:
+            with urllib.request.urlopen(f"{URL}/", timeout=3.0) as r:
+                if r.status != 200:
+                    return None
+                return r.read().decode("utf-8", "replace")
+        except Exception as e:
+            print(f"[xochipilli] fetch index failed: {e}")
+            return None
+
+    def _on_shown() -> None:
+        print("[xochipilli] event shown")
+        _activate_cocoa()
+        # Prefer load_html + base_uri: WKWebView on this host often stayed pure white
+        # with load_url("http://127.0.0.1:…") alone (see DESKTOP_INCIDENTS_2026-08-04).
+        try:
+            html = _fetch_index_html()
+            if html and ("<html" in html.lower() or "<!doctype" in html.lower()):
+                base = f"{URL}/"
+                # Absolute static/API roots so CSS/JS load even if base_uri is ignored
+                html_abs = (
+                    html.replace('href="/static/', f'href="{base}static/')
+                    .replace("href='/static/", f"href='{base}static/")
+                    .replace('src="/static/', f'src="{base}static/')
+                    .replace("src='/static/", f"src='{base}static/")
+                    .replace('href="/favicon', f'href="{base}favicon')
+                    .replace('src="/api/', f'src="{base}api/')
+                )
+                try:
+                    window.load_html(html_abs, base_uri=base)
+                    print(f"[xochipilli] load_html ok base_uri={base} bytes={len(html_abs)}")
+                except TypeError:
+                    # older pywebview: no base_uri kw
+                    window.load_html(html_abs)
+                    print(f"[xochipilli] load_html ok (no base_uri) bytes={len(html_abs)}")
+                return        except Exception as e:
+            print(f"[xochipilli] load_html path failed: {e}")
+        try:
+            window.load_url(f"{URL}/")
+            print(f"[xochipilli] fallback load_url {URL}/")
+        except Exception as e:
+            print(f"[xochipilli] load_url failed: {e}")
+
+    def _on_loaded() -> None:
+        print("[xochipilli] event loaded")
+
+    try:
+        window.events.shown += _on_shown
+        window.events.loaded += _on_loaded
+    except Exception as e:
+        print(f"[xochipilli] events hook skipped: {e}")
+        _activate_cocoa()
+        _on_shown()
     # private_mode=False keeps localStorage (lang, play rate)
     try:
-        webview.start(private_mode=False)
+        webview.start(
+            private_mode=False,
+            storage_path=str(storage),
+            debug=False,
+        )
     except TypeError:
-        webview.start()
+        try:
+            webview.start(private_mode=False)
+        except TypeError:
+            webview.start()
     except Exception:
         traceback.print_exc()
         _alert("ウィンドウの表示に失敗した。session.log を確認してください。", critical=True)

@@ -7,6 +7,7 @@ Product docs ship in three languages. File order convention: **English (default 
 |-------|----|----|-----|
 | Product README | [../README.md](../README.md) | [../README.ja.md](../README.ja.md) | [../README.zh.md](../README.zh.md) |
 | Desktop launch | [DESKTOP.md](DESKTOP.md) | [DESKTOP.ja.md](DESKTOP.ja.md) | [DESKTOP.zh.md](DESKTOP.zh.md) |
+| Desktop incidents (2026-08-04) | [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) | same | — |
 | Keyboard | [KEYS.md](KEYS.md) | [KEYS.ja.md](KEYS.ja.md) | [KEYS.zh.md](KEYS.zh.md) |
 | Video API | [VIDEO_API.md](VIDEO_API.md) | [VIDEO_API.ja.md](VIDEO_API.ja.md) | [VIDEO_API.zh.md](VIDEO_API.zh.md) |
 | Brand | [BRAND.md](BRAND.md) | [BRAND.ja.md](BRAND.ja.md) | [BRAND.zh.md](BRAND.zh.md) |
