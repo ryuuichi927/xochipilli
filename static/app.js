@@ -2020,7 +2020,7 @@ function renderSegments(opts = {}) {
           note.textContent = c.note;
           left.appendChild(note);
         }
-        // Partial regen (subclips) — chips + optional free text
+        // Partial regen (subclips) — chips + per-selected corrective prompts
         const subs = c.subclips || [];
         if (subs.length > 1) {
           const regenRow = document.createElement("div");
@@ -2028,17 +2028,44 @@ function renderSegments(opts = {}) {
           const regenLab = document.createElement("span");
           regenLab.className = "mini";
           regenLab.textContent = t("regenSubclips") + ":";
+          regenLab.title = t("regenCorrectHelp");
           regenRow.appendChild(regenLab);
           const chipWrap = document.createElement("div");
           chipWrap.className = "regen-chips";
           const selected = new Set();
-          const regenIn = document.createElement("input");
-          regenIn.type = "text";
-          regenIn.className = "regen-input";
-          regenIn.placeholder = t("regenPlaceholder");
-          regenIn.title = t("regenHelp");
-          const syncInput = () => {
-            regenIn.value = [...selected].sort((a, b) => a - b).join(",");
+          const promptRows = document.createElement("div");
+          promptRows.className = "regen-prompt-rows";
+          const promptValues = {};
+          const renderPromptRows = () => {
+            // Preserve textarea values for selected indices
+            promptRows.querySelectorAll("textarea[data-idx]").forEach((ta) => {
+              promptValues[ta.dataset.idx] = ta.value;
+            });
+            promptRows.innerHTML = "";
+            const idxs = [...selected].sort((a, b) => a - b);
+            if (!idxs.length) return;
+            const help = document.createElement("div");
+            help.className = "mini";
+            help.textContent = t("regenCorrectPrompt") + " — " + t("regenCorrectHelp");
+            promptRows.appendChild(help);
+            for (const i of idxs) {
+              const row = document.createElement("div");
+              row.className = "regen-prompt-row";
+              const num = document.createElement("span");
+              num.className = "num";
+              num.textContent = String(i);
+              const ta = document.createElement("textarea");
+              ta.dataset.idx = String(i);
+              ta.placeholder = t("regenCorrectPh");
+              ta.title = t("regenCorrectHelp");
+              ta.rows = 2;
+              ta.value = promptValues[String(i)] || "";
+              ta.onclick = (ev) => ev.stopPropagation();
+              ta.onmousedown = (ev) => ev.stopPropagation();
+              row.appendChild(num);
+              row.appendChild(ta);
+              promptRows.appendChild(row);
+            }
           };
           for (let i = 0; i < subs.length; i++) {
             const chip = document.createElement("button");
@@ -2055,23 +2082,32 @@ function renderSegments(opts = {}) {
                 selected.add(i);
                 chip.classList.add("on");
               }
-              syncInput();
+              renderPromptRows();
             };
             chipWrap.appendChild(chip);
           }
           regenRow.appendChild(chipWrap);
-          regenRow.appendChild(regenIn);
           const bReg = document.createElement("button");
           bReg.type = "button";
           bReg.className = "ghost";
           bReg.textContent = t("btnRegenParts");
           bReg.onclick = (ev) => {
             ev.stopPropagation();
-            const raw = regenIn.value.trim() || [...selected].join(",");
-            regenSubclips(s.id, c.id, raw).catch((e) => setStatus(e.message));
+            const idxs = [...selected].sort((a, b) => a - b);
+            if (!idxs.length) {
+              setStatus(t("statusRegenNeedIdx"));
+              return;
+            }
+            const promptsMap = {};
+            promptRows.querySelectorAll("textarea[data-idx]").forEach((ta) => {
+              const v = (ta.value || "").trim();
+              if (v) promptsMap[ta.dataset.idx] = v;
+            });
+            regenSubclips(s.id, c.id, idxs, promptsMap).catch((e) => setStatus(e.message));
           };
           regenRow.appendChild(bReg);
           left.appendChild(regenRow);
+          left.appendChild(promptRows);
         }
         const acts = document.createElement("div");
         acts.className = "clip-actions";
@@ -2413,25 +2449,40 @@ async function unmatchSeg(sid) {
   }
 }
 
-async function regenSubclips(sid, clipId, rawIndices) {
-  const indices = String(rawIndices || "")
-    .split(/[\s,]+/)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .map((x) => parseInt(x, 10))
-    .filter((n) => Number.isFinite(n));
-  if (!indices.length) {
+async function regenSubclips(sid, clipId, indices, promptsMap) {
+  let sorted;
+  if (Array.isArray(indices)) {
+    sorted = indices
+      .map((x) => parseInt(x, 10))
+      .filter((n) => Number.isFinite(n));
+  } else {
+    // safety: accept legacy comma-separated string
+    sorted = String(indices || "")
+      .split(/[\s,]+/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((x) => parseInt(x, 10))
+      .filter((n) => Number.isFinite(n));
+  }
+  sorted = [...new Set(sorted)].sort((a, b) => a - b);
+  if (!sorted.length) {
     setStatus(t("statusRegenNeedIdx"));
     return;
   }
-  setStatus(t("statusRegenBusy", { n: indices.join(",") }));
+  const prompts = {};
+  if (promptsMap && typeof promptsMap === "object") {
+    for (const [k, v] of Object.entries(promptsMap)) {
+      if (typeof v === "string" && v.trim()) prompts[String(k)] = v.trim();
+    }
+  }
+  setStatus(t("statusRegenBusy", { n: sorted.join(",") }));
   try {
     const data = await api(
       `/api/projects/${state.project.id}/segments/${sid}/clips/${clipId}/regen-subclips`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ indices }),
+        body: JSON.stringify({ indices: sorted, prompts }),
       }
     );
     const seg = (state.project.segments || []).find((x) => x.id === sid);

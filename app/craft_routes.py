@@ -40,6 +40,7 @@ class AffectBody(BaseModel):
 
 class RegenSubclipsBody(BaseModel):
     indices: list[int] = Field(default_factory=list)
+    prompts: dict[str, str] = Field(default_factory=dict)
 
 
 def _provider_name() -> str:
@@ -136,6 +137,11 @@ def register(app) -> None:
             negative_prompt=p.get("negative_prompt") or "",
             apply_taste=bool(apply_t),
         )
+        prompts: dict[str, str] = {}
+        for k, v in (body.prompts or {}).items():
+            key = str(k).strip()
+            if key and isinstance(v, str) and v.strip():
+                prompts[key] = v.strip()
         updated = await craft.regen_subclips(
             pid=pid,
             seg=seg,
@@ -145,6 +151,7 @@ def register(app) -> None:
             provider=_provider_name(),
             style=st,
             negative_prompt=neg,
+            prompts=prompts,
         )
         for i, c in enumerate(seg.get("clips") or []):
             if c.get("id") == clip_id:

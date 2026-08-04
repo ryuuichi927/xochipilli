@@ -163,6 +163,7 @@ async def regen_subclips(
     provider: str = "mock",
     style: str = "",
     negative_prompt: str = "",
+    prompts: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     subs = list(clip.get("subclips") or [])
     if not subs:
@@ -186,8 +187,22 @@ async def regen_subclips(
 
     part_paths: list[Path] = [clips_dir / Path(str(sc["file"])).name for sc in subs]
 
+    # Cumulative time windows for every subclip (for TIME WINDOW in compose).
+    windows: list[tuple[float, float]] = []
+    cum = 0.0
+    for sc in subs:
+        d = float(sc.get("duration") or unit)
+        windows.append((cum, cum + d))
+        cum += d
+    sequence_duration = float(feat.get("duration_sec") or cum)
+    total_parts = len(subs)
+    base_prompt = seg.get("prompt") or ""
+
     for i in idx_set:
         part_dur = float(subs[i].get("duration") or unit)
+        window_t0, window_t1 = windows[i]
+        override = (prompts or {}).get(str(i), "").strip()
+        user_prompt = override if override else base_prompt
         cur_start: Path | None = None
         if i > 0 and part_paths[i - 1].is_file():
             fp = clips_dir / f"{sid}-regen-{clip['id']}-p{i:02d}-start.jpg"
@@ -203,7 +218,7 @@ async def regen_subclips(
 
         feat_part = {**feat, "duration_sec": part_dur}
         composed = compose_video_prompt(
-            seg.get("prompt") or "",
+            user_prompt,
             feat_part,
             world=world or "",
             chain_from_prev=bool(cur_start),
@@ -213,13 +228,18 @@ async def regen_subclips(
             negative_prompt=negative_prompt or "",
             valence=_clamp(seg.get("valence"), -1.0, 1.0),
             arousal=_clamp(seg.get("arousal"), 0.0, 1.0),
+            part_index=i,
+            total_parts=total_parts,
+            window_t0=window_t0,
+            window_t1=window_t1,
+            sequence_duration=sequence_duration,
         )
         out_part = clips_dir / f"{sid}-{clip['id'][2:]}-p{i:02d}-r{uuid.uuid4().hex[:4]}.mp4"
         try:
             meta = await generate_clip(
                 out_path=out_part,
                 duration=part_dur,
-                user_prompt=seg.get("prompt") or "",
+                user_prompt=user_prompt,
                 composed_prompt=composed,
                 tags=tags,
                 audio_segment=None,
@@ -241,6 +261,7 @@ async def regen_subclips(
             "is_mock": bool(meta.get("is_mock")),
             "regenerated_at": storage._now(),
             "chain_frame": Path(cur_start).name if cur_start else subs[i].get("chain_frame"),
+            "corrective_prompt": override or None,
         }
         try:
             if old.is_file() and old.resolve() != out_part.resolve():

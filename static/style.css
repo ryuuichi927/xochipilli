@@ -1139,6 +1139,30 @@ video#video {
   padding: 0.2rem 0.35rem;
   font-size: 0.8rem;
 }
+.regen-prompt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+.regen-prompt-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.regen-prompt-row .num {
+  min-width: 1.4em;
+  opacity: 0.7;
+  padding-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.regen-prompt-row textarea {
+  flex: 1;
+  min-height: 2.4em;
+  resize: vertical;
+  font: inherit;
+}
 .panel-h-sub {
   margin-top: 0.55rem;
   font-size: 0.82rem;

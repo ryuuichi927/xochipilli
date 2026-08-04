@@ -684,9 +684,13 @@ async def _api_generate_inner(pid: str, sid: str):
     modes_used: list[str] = []
     partial_error: str | None = None
 
+    window_cum = 0.0
     for i in range(n_parts):
         planned = plan[i] if i < len(plan) else {"kind": "t2v", "duration_sec": unit}
         part_dur = float(planned.get("duration_sec") or unit)
+        window_t0 = window_cum
+        window_t1 = window_cum + part_dur
+        window_cum += part_dur
         plan_kind = str(planned.get("kind") or "t2v")
 
         chain_here = bool(cur_start) and (chain or user_ref or i > 0)
@@ -712,6 +716,11 @@ async def _api_generate_inner(pid: str, sid: str):
             negative_prompt=neg,
             valence=craft._clamp(seg.get("valence"), -1.0, 1.0),
             arousal=craft._clamp(seg.get("arousal"), 0.0, 1.0),
+            part_index=i,
+            total_parts=n_parts,
+            window_t0=window_t0,
+            window_t1=window_t1,
+            sequence_duration=dur,
         )
         if i == 0:
             composed_first = composed
