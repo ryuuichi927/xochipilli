@@ -6,6 +6,15 @@ from pathlib import Path
 from typing import Any
 
 
+def clip_unit_seconds() -> float:
+    """Default generation unit length (seconds). Longer segments are auto-split."""
+    try:
+        v = float(os.environ.get("CLIP_UNIT_SECONDS") or "5")
+    except ValueError:
+        v = 5.0
+    return max(2.0, min(v, 12.0))
+
+
 def _escape_drawtext(s: str) -> str:
     return (
         s.replace("\\", "\\\\")
@@ -183,6 +192,119 @@ def extract_last_frame(video_path: Path, out_jpg: Path) -> Path:
     return out_jpg
 
 
+def concat_video_files(paths: list[Path], out_path: Path) -> Path:
+    """Hard-cut concatenate mp4 parts into one file (re-encode for stable timestamps)."""
+    if not paths:
+        raise ValueError("no parts to concat")
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if len(paths) == 1:
+        if paths[0].resolve() != out_path.resolve():
+            out_path.write_bytes(paths[0].read_bytes())
+        return out_path
+
+    import tempfile
+
+    work = Path(tempfile.mkdtemp(prefix="xochi-concat-"))
+    try:
+        lst = work / "list.txt"
+        lines = [f"file '{p.resolve()}'" for p in paths]
+        lst.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        tmp = work / "joined.mp4"
+        r = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(lst),
+                "-c",
+                "copy",
+                str(tmp),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0 or not tmp.is_file():
+            # re-encode fallback
+            r2 = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(lst),
+                    "-an",
+                    "-vf",
+                    "scale=1280:720:force_original_aspect_ratio=decrease,"
+                    "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+                    "-r",
+                    "24",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    str(out_path),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if r2.returncode != 0 or not out_path.is_file():
+                raise RuntimeError(
+                    f"ffmpeg concat failed: {(r.stderr or r2.stderr or '')[-600:]}"
+                )
+            return out_path
+
+        # clean re-encode for timestamps
+        r3 = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(tmp),
+                "-an",
+                "-vf",
+                "scale=1280:720:force_original_aspect_ratio=decrease,"
+                "pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=24,format=yuv420p",
+                "-r",
+                "24",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if r3.returncode != 0 or not out_path.is_file():
+            # copy was enough
+            out_path.write_bytes(tmp.read_bytes())
+        return out_path
+    finally:
+        import shutil
+
+        shutil.rmtree(work, ignore_errors=True)
+
+
 async def generate_fal_clip(prompt: str, duration: float, out_path: Path) -> dict[str, Any]:
     import httpx
 
@@ -295,7 +417,8 @@ async def generate_xai_clip(
     base_url = str(creds["base_url"]).rstrip("/")
     aspect = (os.environ.get("XAI_VIDEO_ASPECT") or "16:9").strip()
     resolution = _normalize_xai_resolution(os.environ.get("XAI_VIDEO_RESOLUTION"))
-    dur = int(max(1, min(round(float(duration or 8)), 15)))
+    # Prefer short units; hard cap 15 for API
+    dur = int(max(1, min(round(float(duration or 5)), 15)))
 
     use_i2v = bool(start_image and Path(start_image).is_file())
     if use_i2v:
