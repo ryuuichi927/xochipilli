@@ -1489,6 +1489,41 @@ function renderSegments() {
     refRow.appendChild(bRefClear);
     card.appendChild(refRow);
 
+    // Camera lock toggle (hard tripod lock in composed prompt)
+    const lockRow = document.createElement("label");
+    lockRow.className = "camera-lock-label";
+    const lockCb = document.createElement("input");
+    lockCb.type = "checkbox";
+    lockCb.checked = !!s.camera_lock;
+    lockCb.addEventListener("change", async () => {
+      const on = !!lockCb.checked;
+      try {
+        const data = await api(
+          `/api/projects/${state.project.id}/segments/${s.id}/camera-lock`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ camera_lock: on }),
+          }
+        );
+        const seg = (state.project.segments || []).find((x) => x.id === s.id);
+        if (seg) {
+          seg.camera_lock = !!(data && data.camera_lock);
+        }
+        commitHistory("camera-lock");
+        setStatus(on ? t("statusCameraLockOn") : t("statusCameraLockOff"));
+        renderSegments();
+      } catch (e) {
+        lockCb.checked = !!s.camera_lock;
+        setStatus(t("statusCameraLockFail", { err: e.message }));
+      }
+    });
+    lockRow.appendChild(lockCb);
+    const lockTxt = document.createElement("span");
+    lockTxt.textContent = t("cameraLock");
+    lockRow.appendChild(lockTxt);
+    card.appendChild(lockRow);
+
     const actions = document.createElement("div");
     actions.className = "seg-actions";
 
@@ -1576,8 +1611,10 @@ function renderSegments() {
         meta.className = "clip-meta";
         const bits = [c.provider || "?", c.model || "", c.file || ""];
         if (c.chained) bits.push(t("chained"));
+        if (c.camera_lock) bits.push(t("cameraLock"));
         meta.textContent = bits.filter(Boolean).join(" · ");
         if (c.chained) meta.classList.add("chain-tag");
+        if (c.camera_lock) meta.classList.add("lock-tag");
         left.appendChild(title);
         left.appendChild(meta);
         if (c.note) {
@@ -1864,10 +1901,12 @@ async function generateSeg(sid, promptText) {
     showVideo(data.segment);
     const ch = data.clip?.chained || data.segment?.video?.chained;
     const uref = data.clip?.user_ref_image || data.segment?.video?.user_ref_image;
+    const clock = data.clip?.camera_lock || data.segment?.camera_lock;
     const base = t("statusGenOk", { provider: data.segment.video?.provider || "?" });
     let msg = base;
     if (uref) msg += " · " + t("statusGenWithRef");
     else if (ch) msg += " · " + t("statusChain");
+    if (clock) msg += " · " + t("statusCameraLockOn");
     setStatus(msg);
     commitHistory("generate");
     ok = true;

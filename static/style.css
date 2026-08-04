@@ -991,6 +991,31 @@ video#video {
   margin: 0;
 }
 
+.camera-lock-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0.15rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.camera-lock-label input {
+  accent-color: var(--accent);
+  width: 1rem;
+  height: 1rem;
+}
+.camera-lock-label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: #f5e6a8;
+}
+
 /* Brand */
 .brand-mark {
   width: 32px;

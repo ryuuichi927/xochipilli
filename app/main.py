@@ -54,6 +54,10 @@ class SegmentPromptBody(BaseModel):
     prompt: str = ""
 
 
+class CameraLockBody(BaseModel):
+    camera_lock: bool = False
+
+
 class SegmentTimesBody(BaseModel):
     t0: float
     t1: float
@@ -348,6 +352,18 @@ def api_seg_prompt(pid: str, sid: str, body: SegmentPromptBody):
     raise HTTPException(404, "segment not found")
 
 
+@app.put("/api/projects/{pid}/segments/{sid}/camera-lock")
+def api_seg_camera_lock(pid: str, sid: str, body: CameraLockBody):
+    """Per-segment hard camera lock for the next generate (and prompt compose)."""
+    p = _proj(pid)
+    for s in p["segments"]:
+        if s["id"] == sid:
+            s["camera_lock"] = bool(body.camera_lock)
+            storage.save_project(p)
+            return s
+    raise HTTPException(404, "segment not found")
+
+
 @app.post("/api/projects/{pid}/segments/{sid}/ref-image")
 async def api_seg_ref_image(pid: str, sid: str, file: UploadFile = File(...)):
     """Attach a still image used as i2v start frame on next generate (beats auto chain)."""
@@ -563,12 +579,14 @@ async def _api_generate_inner(pid: str, sid: str):
                         start_image = None
                         chain = False
 
+    cam_lock = bool(seg.get("camera_lock"))
     composed = compose_video_prompt(
         seg["prompt"],
         feat,
         world=p.get("world") or "",
         chain_from_prev=chain and not user_ref,
         user_ref_image=user_ref,
+        camera_lock=cam_lock,
     )
     tags = list((seg.get("constraints") or {}).get("soft_tags") or [])
     dur = float(feat.get("duration_sec") or (seg["t1"] - seg["t0"]))
@@ -613,6 +631,7 @@ async def _api_generate_inner(pid: str, sid: str):
         "chain_frame": start_image.name if start_image else None,
         "user_ref_image": bool(user_ref),
         "ref_image": seg.get("ref_image") if user_ref else None,
+        "camera_lock": bool(cam_lock or (chain and not user_ref)),
     }
     seg.setdefault("clips", []).append(entry)
     seg["active_clip_id"] = clip_id
