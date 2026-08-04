@@ -380,14 +380,14 @@ def main() -> int:
                     # older pywebview: no base_uri kw
                     window.load_html(html_abs)
                     print(f"[xochipilli] load_html ok (no base_uri) bytes={len(html_abs)}")
-                return        except Exception as e:
+                return
+        except Exception as e:
             print(f"[xochipilli] load_html path failed: {e}")
         try:
             window.load_url(f"{URL}/")
             print(f"[xochipilli] fallback load_url {URL}/")
         except Exception as e:
             print(f"[xochipilli] load_url failed: {e}")
-
     def _on_loaded() -> None:
         print("[xochipilli] event loaded")
 
