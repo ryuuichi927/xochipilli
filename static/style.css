@@ -1016,6 +1016,20 @@ video#video {
   color: #f5e6a8;
 }
 
+.preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.canva-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.2rem;
+}
+
 /* Brand */
 .brand-mark {
   width: 32px;

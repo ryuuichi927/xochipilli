@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -147,6 +147,12 @@ def health():
         out["video_model"] = out["fal_model"] or "fal"
     else:
         out["video_model"] = "mock"
+    try:
+        from . import canva as canva_mod
+
+        out["canva"] = canva_mod.status()
+    except Exception as e:
+        out["canva"] = {"ok": False, "error": str(e)}
     return out
 
 
@@ -1001,6 +1007,188 @@ def api_program_file(pid: str):
     if not path.is_file():
         raise HTTPException(404, "program not built yet — export first")
     return FileResponse(path, media_type="video/mp4", filename="program.mp4")
+
+
+# --- Canva Connect (export polish) -------------------------------------------
+
+
+class CanvaSendBody(BaseModel):
+    """what: program | clip | segment_active | ref
+    For clip: pass clip_file name under clips/.
+    For segment_active / ref: pass segment_id.
+    open_design: try create Canva design (images only).
+    """
+
+    what: str = "program"
+    segment_id: Optional[str] = None
+    clip_file: Optional[str] = None
+    open_design: bool = True
+    title: Optional[str] = None
+
+
+@app.get("/api/canva/status")
+def api_canva_status():
+    from . import canva as canva_mod
+
+    return canva_mod.status()
+
+
+@app.get("/api/canva/authorize")
+def api_canva_authorize():
+    from . import canva as canva_mod
+
+    try:
+        return canva_mod.start_authorize()
+    except Exception as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/canva/callback")
+def api_canva_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    from . import canva as canva_mod
+
+    if error:
+        msg = error_description or error
+        html = f"""<!doctype html><meta charset=utf-8>
+<title>Canva</title><body style="font-family:system-ui;padding:2rem;background:#0c0e12;color:#eee">
+<h1>Canva authorize failed</h1><p>{msg}</p>
+<p><a href="/" style="color:#c9a227">Back to Xochipilli</a></p></body>"""
+        return HTMLResponse(html, status_code=400)
+    if not code:
+        raise HTTPException(400, "missing code")
+    try:
+        canva_mod.finish_authorize(code, state)
+    except Exception as e:
+        html = f"""<!doctype html><meta charset=utf-8>
+<title>Canva</title><body style="font-family:system-ui;padding:2rem;background:#0c0e12;color:#eee">
+<h1>Token exchange failed</h1><p>{e}</p>
+<p><a href="/" style="color:#c9a227">Back to Xochipilli</a></p></body>"""
+        return HTMLResponse(html, status_code=400)
+    html = """<!doctype html><meta charset=utf-8>
+<title>Canva connected</title>
+<body style="font-family:system-ui;padding:2rem;background:#0c0e12;color:#eee">
+<h1 style="color:#c9a227">Canva connected</h1>
+<p>You can close this tab and send clips from Xochipilli.</p>
+<script>try{if(window.opener){window.opener.postMessage({type:'canva-connected'},'*');}}catch(e){}
+setTimeout(function(){ location.href='/'; }, 1200);</script>
+<p><a href="/" style="color:#c9a227">Back to Xochipilli</a></p></body>"""
+    return HTMLResponse(html)
+
+
+@app.post("/api/canva/disconnect")
+def api_canva_disconnect():
+    from . import canva as canva_mod
+
+    canva_mod.clear_tokens()
+    return {"ok": True, **canva_mod.status()}
+
+
+@app.post("/api/projects/{pid}/canva/send")
+def api_canva_send(pid: str, body: CanvaSendBody):
+    """Upload a clip / program / ref image into the user's Canva library."""
+    from . import canva as canva_mod
+
+    if not canva_mod.configured():
+        raise HTTPException(
+            400,
+            "Canva not configured — set CANVA_CLIENT_ID / CANVA_CLIENT_SECRET in .env",
+        )
+    try:
+        # ensure token (refresh if needed)
+        canva_mod.access_token()
+    except Exception as e:
+        raise HTTPException(401, str(e)) from e
+
+    p = _proj(pid)
+    pdir = storage.project_dir(pid)
+    clips_dir = pdir / "clips"
+    refs_dir = pdir / "refs"
+    what = (body.what or "program").lower().strip()
+    path: Path | None = None
+    display = body.title or p.get("title") or "Xochipilli"
+    kind = "video"
+
+    if what == "program":
+        name = (p.get("program") or {}).get("file") or "program.mp4"
+        path = clips_dir / Path(name).name
+        if not path.is_file():
+            raise HTTPException(404, "program.mp4 missing — run Export stitch first")
+        display = f"{display}-program"[:50]
+    elif what == "clip":
+        if not body.clip_file:
+            raise HTTPException(400, "clip_file required")
+        path = clips_dir / Path(body.clip_file).name
+        if not path.is_file():
+            raise HTTPException(404, "clip file not found")
+        display = f"{display}-{path.stem}"[:50]
+    elif what in {"segment_active", "active"}:
+        sid = body.segment_id
+        seg = next((s for s in (p.get("segments") or []) if s.get("id") == sid), None)
+        if not seg:
+            raise HTTPException(404, "segment not found")
+        clip = None
+        aid = seg.get("active_clip_id")
+        clips = seg.get("clips") or []
+        if aid:
+            clip = next((c for c in clips if c.get("id") == aid), None)
+        if not clip and seg.get("video", {}).get("file"):
+            clip = seg.get("video")
+        if not clip and clips:
+            clip = clips[-1]
+        if not clip or not clip.get("file"):
+            raise HTTPException(404, "segment has no clip")
+        path = clips_dir / Path(clip["file"]).name
+        display = f"{display}-{sid[:8]}"[:50]
+    elif what == "ref":
+        sid = body.segment_id
+        seg = next((s for s in (p.get("segments") or []) if s.get("id") == sid), None)
+        if not seg or not seg.get("ref_image"):
+            raise HTTPException(404, "segment has no ref image")
+        path = refs_dir / Path(seg["ref_image"]).name
+        kind = "image"
+        display = f"{display}-ref"[:50]
+    else:
+        raise HTTPException(400, f"unknown what={what}")
+
+    if not path or not path.is_file():
+        raise HTTPException(404, "file not found")
+
+    try:
+        up = canva_mod.upload_file(path, display_name=display)
+    except Exception as e:
+        raise HTTPException(502, f"Canva upload failed: {e}") from e
+
+    result: dict[str, Any] = {
+        "ok": True,
+        "what": what,
+        "local_file": path.name,
+        "upload": up,
+        "library_url": canva_mod.open_library_url(),
+        "design": None,
+        "note": None,
+    }
+    asset_id = up.get("asset_id")
+    asset_type = (up.get("type") or "").lower()
+    # Design-from-asset only supports images today
+    if body.open_design and asset_id and asset_type == "image":
+        try:
+            result["design"] = canva_mod.create_design_from_image(
+                asset_id, title=display
+            )
+        except Exception as e:
+            result["note"] = f"uploaded OK; design create skipped: {e}"
+    elif asset_type == "video":
+        result["note"] = (
+            "Video is in your Canva library (Projects). "
+            "Open Canva → Projects to drop it on a design. "
+            "API cannot auto-place video on a design yet."
+        )
+    return result
 
 
 @app.delete("/api/projects/{pid}/segments/{sid}")

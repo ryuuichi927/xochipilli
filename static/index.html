@@ -6,7 +6,7 @@
   <title>ショチピリ</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
   <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/style.css?v=camlock1" />
+  <link rel="stylesheet" href="/static/style.css?v=canva1" />
 </head>
 <body>
   <header class="top">
@@ -93,6 +93,7 @@
               <button id="btnPlayProgram" type="button" class="ghost primary" data-i18n="btnPlayProgram">通し再生</button>
               <button id="btnPlayWithMusic" type="button" class="ghost" data-i18n="btnPlayWithMusic">この区間だけ</button>
               <button id="btnExportProgram" type="button" class="ghost" data-i18n="btnExportProgram">結合書き出し</button>
+              <button id="btnCanvaSend" type="button" class="ghost" data-i18n="btnCanvaSend">Canva に送る</button>
             </div>
             <audio id="audio" controls></audio>
           </div>
@@ -136,6 +137,14 @@
       <hr class="settings-hr" />
       <p class="hint" data-i18n="hintPin">波形クリックはシーク、または区間枠をクリックで編集へ。ピンは P（再生ヘッド）。</p>
       <hr class="settings-hr" />
+      <div class="settings-label" data-i18n="settingsCanvaTitle">Canva</div>
+      <p class="hint" id="canvaStatusHint" data-i18n="settingsCanvaHint">仕上げ用。結合書き出しした映像を Canva の素材庫へ送ります。</p>
+      <div class="canva-row">
+        <button id="btnCanvaConnect" type="button" class="ghost" data-i18n="btnCanvaConnect">Canva に接続</button>
+        <button id="btnCanvaDisconnect" type="button" class="ghost" data-i18n="btnCanvaDisconnect">切断</button>
+      </div>
+      <p class="hint" id="canvaStatusLine"></p>
+      <hr class="settings-hr" />
       <div class="settings-label" data-i18n="settingsDesigner">設計</div>
       <p class="settings-designer-name" id="settingsDesignerName" data-i18n="settingsDesignerName">龍一 · Ryuichi Hamakawa</p>
       <p class="hint" data-i18n="settingsDesignerNote">Xochipilli / ショチピリ — 音楽映画作業台</p>
@@ -158,7 +167,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=camlock1"></script>
-  <script src="/static/app.js?v=camlock1"></script>
+  <script src="/static/i18n.js?v=canva1"></script>
+  <script src="/static/app.js?v=canva1"></script>
 </body>
 </html>

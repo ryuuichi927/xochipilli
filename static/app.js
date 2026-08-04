@@ -2398,6 +2398,84 @@ async function exportProgramStitch() {
   }
 }
 
+async function refreshCanvaStatus() {
+  const line = $("canvaStatusLine");
+  try {
+    const st = await api("/api/canva/status");
+    state.canva = st;
+    if (!line) return st;
+    if (!st.configured) {
+      line.textContent = t("statusCanvaNeedConfig");
+    } else if (st.connected) {
+      line.textContent = t("statusCanvaConnected");
+    } else {
+      line.textContent = t("statusCanvaDisconnected");
+    }
+    return st;
+  } catch (e) {
+    if (line) line.textContent = e.message;
+    return null;
+  }
+}
+
+async function connectCanva() {
+  const st = (await refreshCanvaStatus()) || {};
+  if (!st.configured) {
+    setStatus(t("statusCanvaNeedConfig"));
+    return;
+  }
+  const data = await api("/api/canva/authorize");
+  if (!data.authorize_url) throw new Error("no authorize_url");
+  window.open(data.authorize_url, "canva_oauth", "width=520,height=720");
+  setStatus(t("statusCanvaNeedConnect"));
+}
+
+async function disconnectCanva() {
+  await api("/api/canva/disconnect", { method: "POST", body: "{}" });
+  await refreshCanvaStatus();
+  setStatus(t("statusCanvaDisconnected"));
+}
+
+async function sendToCanva() {
+  if (!state.project?.id) return;
+  const st = (await refreshCanvaStatus()) || {};
+  if (!st.configured) {
+    setStatus(t("statusCanvaNeedConfig"));
+    return;
+  }
+  if (!st.connected && !st.token_valid) {
+    setStatus(t("statusCanvaNeedConnect"));
+    return;
+  }
+  const btn = $("btnCanvaSend");
+  if (btn) btn.disabled = true;
+  setStatus(t("statusCanvaSending"));
+  try {
+    let body = { what: "program", open_design: true };
+    if (!state.project?.program?.file) {
+      const sid = state.previewSegId || state.selectedSegId;
+      if (sid) body = { what: "segment_active", segment_id: sid, open_design: true };
+      else throw new Error(t("statusNoAdopted"));
+    }
+    const data = await api(`/api/projects/${state.project.id}/canva/send`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const edit = data.design?.edit_url;
+    const lib = data.library_url;
+    let msg = t("statusCanvaOk");
+    if (data.note) msg += ` · ${data.note}`;
+    if (data.upload?.asset_id) msg += ` · id ${data.upload.asset_id}`;
+    setStatus(msg);
+    if (edit) window.open(edit, "_blank");
+    else if (lib) window.open(lib, "_blank");
+  } catch (e) {
+    setStatus(t("statusCanvaFail", { err: e.message }));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function syncVideoToMusic() {
   if (!$("syncMusic")?.checked) {
     state.syncMusic = false;
@@ -2774,6 +2852,25 @@ function wire() {
   if (bex) {
     bex.onclick = () => exportProgramStitch().catch((e) => setStatus(e.message));
   }
+  const bCanva = $("btnCanvaSend");
+  if (bCanva) {
+    bCanva.onclick = () => sendToCanva().catch((e) => setStatus(t("statusCanvaFail", { err: e.message })));
+  }
+  const bCanvaConn = $("btnCanvaConnect");
+  if (bCanvaConn) {
+    bCanvaConn.onclick = () => connectCanva().catch((e) => setStatus(t("statusCanvaFail", { err: e.message })));
+  }
+  const bCanvaDisc = $("btnCanvaDisconnect");
+  if (bCanvaDisc) {
+    bCanvaDisc.onclick = () => disconnectCanva().catch((e) => setStatus(t("statusCanvaFail", { err: e.message })));
+  }
+  window.addEventListener("message", (ev) => {
+    if (ev?.data?.type === "canva-connected") {
+      refreshCanvaStatus().catch(() => {});
+      setStatus(t("statusCanvaConnected"));
+    }
+  });
+  refreshCanvaStatus().catch(() => {});
   $("btnOpenFolder").onclick = () => openCurrentProjectFolder().catch((e) => setStatus(t("statusOpenFolderFail", { err: e.message })));
   $("fileInput").onchange = async (e) => {
     const f = e.target.files?.[0];
