@@ -1582,8 +1582,37 @@ function updatePinUi() {
     open == null ? t("pinNone") : t("pinOpen", { t: fmt(open) });
 }
 
-function renderSegments() {
+function renderSegments(opts = {}) {
+  const force = !!(opts && opts.force);
   const root = $("segments");
+  if (!root) return;
+
+  // Snapshot in-progress prompt drafts BEFORE wiping the DOM.
+  // Otherwise any re-render (badge poll, i18n, gen label refresh…) kills unsaved text
+  // and kicks the caret out of the field mid-type.
+  const draftBySid = new Map();
+  let resumeFocus = null;
+  try {
+    root.querySelectorAll(".seg-card textarea").forEach((ta) => {
+      const card = ta.closest(".seg-card");
+      const sid = card?.dataset?.id;
+      if (!sid) return;
+      draftBySid.set(sid, ta.value);
+      if (document.activeElement === ta) {
+        resumeFocus = {
+          sid,
+          start: ta.selectionStart,
+          end: ta.selectionEnd,
+          scrollTop: ta.scrollTop,
+        };
+      }
+    });
+  } catch (_) {}
+
+  // Soft skip only when not forced and something else already holds a draft
+  // we cannot safely rebuild — still rebuild, but always restore drafts below.
+  void force;
+
   root.textContent = "";
   const segs = state.project?.segments || [];
   if (!segs.length) {
@@ -1593,15 +1622,25 @@ function renderSegments() {
     root.appendChild(empty);
     return;
   }
+
+  // Stable numbers by timeline order (t0), independent of reverse display order.
+  const numById = new Map(
+    [...segs]
+      .sort((a, b) => Number(a.t0) - Number(b.t0) || String(a.id).localeCompare(String(b.id)))
+      .map((s, i) => [s.id, i + 1])
+  );
+
   for (const s of [...segs].reverse()) {
     const card = document.createElement("div");
     card.className = "seg-card" + (state.selectedSegId === s.id ? " active" : "");
     card.dataset.id = s.id;
+    const n = numById.get(s.id) || "";
+    card.dataset.segNum = String(n);
 
     const head = document.createElement("div");
     head.className = "seg-head";
     const title = document.createElement("strong");
-    title.textContent = t("segLabel");
+    title.textContent = t("segLabelN", { n });
     const time = document.createElement("time");
     time.textContent = `${fmt(s.t0)} – ${fmt(s.t1)} · ${(s.t1 - s.t0).toFixed(2)}s`;
     head.appendChild(title);
@@ -1638,7 +1677,12 @@ function renderSegments() {
     const ta = document.createElement("textarea");
     ta.rows = 3;
     ta.placeholder = t("promptPh");
-    ta.value = s.prompt || "";
+    // Prefer live draft over server snapshot so a mid-type re-render never wipes text.
+    ta.value = draftBySid.has(s.id) ? draftBySid.get(s.id) : s.prompt || "";
+    // Keep local model in sync while typing (save still on change/blur).
+    ta.addEventListener("input", () => {
+      s.prompt = ta.value;
+    });
     // Stop timeline shortcuts (Del/Space/…) from seeing prompt keystrokes.
     ta.addEventListener(
       "keydown",
@@ -2034,6 +2078,24 @@ function renderSegments() {
     }
 
     root.appendChild(card);
+  }
+
+  // Put the caret back if we destroyed a focused prompt mid-edit.
+  if (resumeFocus?.sid) {
+    const card = root.querySelector(`.seg-card[data-id="${resumeFocus.sid}"]`);
+    const ta = card?.querySelector("textarea");
+    if (ta) {
+      requestAnimationFrame(() => {
+        try {
+          ta.focus({ preventScroll: true });
+          const len = ta.value.length;
+          const a = Math.max(0, Math.min(Number(resumeFocus.start) || len, len));
+          const b = Math.max(0, Math.min(Number(resumeFocus.end) || len, len));
+          ta.setSelectionRange(a, b);
+          if (Number.isFinite(resumeFocus.scrollTop)) ta.scrollTop = resumeFocus.scrollTop;
+        } catch (_) {}
+      });
+    }
   }
 }
 
@@ -3458,13 +3520,34 @@ async function refreshVideoBadge() {
     el.textContent = label;
     el.title = title;
     el.setAttribute("aria-label", label);
-    // refresh gen button labels if segments already drawn
-    if (state.project) renderSegments();
+    // Only refresh gen-button cost labels — never wipe segment cards (that
+    // steals focus and deletes in-progress prompt text while typing).
+    updateGenButtonLabels();
   } catch (e) {
     el.textContent = "—";
     el.title = String(e.message || e);
     el.classList.add("badge-warn");
   }
+}
+
+/** Update generate button captions without rebuilding segment cards. */
+function updateGenButtonLabels() {
+  const root = $("segments");
+  if (!root || !state.project) return;
+  root.querySelectorAll(".seg-card").forEach((card) => {
+    const sid = card.dataset.id;
+    if (!sid) return;
+    const seg = (state.project.segments || []).find((x) => x.id === sid);
+    if (!seg) return;
+    const bGen = card.querySelector(".seg-actions button.primary");
+    if (!bGen) return;
+    bGen.textContent = genButtonLabel(seg);
+    bGen.title = t("btnGenCostHint", {
+      n: estimateApiParts(seg),
+      unit: Number(state.health?.clip_unit_seconds) || 5,
+    });
+    bGen.disabled = state.genInflight.has(sid);
+  });
 }
 
 async function boot() {

@@ -50,6 +50,8 @@ html, body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  /* one step larger UI type (user request) */
+  font-size: 17px;
 }
 
 body {
@@ -651,7 +653,10 @@ textarea:focus, button:focus-visible, select:focus-visible {
   gap: 0.5rem;
   align-items: baseline;
   margin-bottom: 0.4rem;
-  font-size: 0.9rem;
+  font-size: 1rem;
+}
+.seg-head strong {
+  letter-spacing: 0.02em;
 }
 .seg-head time { color: var(--muted); font-variant-numeric: tabular-nums; }
 .kw-row { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin: 0.3rem 0; }
