@@ -3170,6 +3170,38 @@ function wire() {
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") openSettings(false);
   });
+  bindLayoutResize();
+}
+
+/** Keep wave/timeline canvas matched to the real window (Chrome --app resize / fullscreen). */
+function bindLayoutResize() {
+  let raf = 0;
+  const kick = () => {
+    if (raf) cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      try {
+        renderWave();
+      } catch (e) {
+        /* ignore mid-teardown */
+      }
+    });
+  };
+  window.addEventListener("resize", kick);
+  try {
+    window.visualViewport?.addEventListener("resize", kick);
+    window.visualViewport?.addEventListener("scroll", kick);
+  } catch (_) {
+    /* older WebKit */
+  }
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => kick());
+  const waveWrap = $("waveWrap");
+  if (waveWrap) ro.observe(waveWrap);
+  const layout = document.querySelector(".layout");
+  if (layout) ro.observe(layout);
+  const stage = document.querySelector(".timeline-stage");
+  if (stage) ro.observe(stage);
 }
 
 async function refreshVideoBadge() {

@@ -1,10 +1,12 @@
 """
-Xochipilli desktop shell (B): local uvicorn + native-feeling window.
+Xochipilli desktop shell: local FastAPI + stable UI window.
 
-Primary: Google Chrome / Edge / Brave / Chromium  --app=http://127.0.0.1:PORT/
-  (WKWebView/pywebview stayed pure white on this host while HTTP served full HTML.)
-
-Fallback: Safari via `open`, then pywebview last resort.
+Shell priority
+1. Chromium --app= (Chrome / Edge / Brave / Arc) with **profile-based lifetime**
+   (do NOT wait on the first Popen pid — Chrome handoff exits with code=-5 on macOS
+   and looks like “fullscreen killed the app”)
+2. Safari
+3. pywebview last resort
 
 Usage:
   .venv/bin/python desktop_app.py
@@ -46,6 +48,23 @@ PORT = int(os.environ.get("PORT", "8787"))
 URL = f"http://{HOST}:{PORT}"
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
+CHROME_PROFILE = SUPPORT / "chrome-app-profile"
+
+# Stable flags for macOS app windows (avoid GPU/session flakiness)
+_CHROME_BASE_FLAGS = (
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-session-crashed-bubble",
+    "--disable-infobars",
+    "--disable-features=Translate,MediaRouter",
+    # Keep process model boring; reduces odd parent-exit (-5 / SIGTRAP) on FS transitions
+    "--disable-background-mode",
+    "--window-size=1440,900",
+)
+
+
+def _log(msg: str) -> None:
+    print(f"[xochipilli] {msg}", flush=True)
 
 
 def _alert(message: str, *, critical: bool = False) -> None:
@@ -54,7 +73,7 @@ def _alert(message: str, *, critical: bool = False) -> None:
         msg = str(message)[:500]
         script = (
             "on run argv\n"
-            f'  display alert "Xochipilli" message (item 1 of argv) as {style} giving up after 12\n'
+            f'  display alert "Xochipilli" message (item 1 of argv) as {style} giving up after 14\n'
             "end run"
         )
         subprocess.run(
@@ -63,7 +82,7 @@ def _alert(message: str, *, critical: bool = False) -> None:
             capture_output=True,
         )
     except Exception:
-        print(f"[xochipilli] ALERT: {message}", file=sys.stderr)
+        print(f"[xochipilli] ALERT: {message}", file=sys.stderr, flush=True)
 
 
 def _health_payload() -> dict | None:
@@ -125,19 +144,18 @@ def _preflight_http() -> tuple[bool, str]:
 def _start_server() -> subprocess.Popen | None:
     if _health_ok():
         h = _health_payload() or {}
-        print(f"[xochipilli] reuse server at {URL} (product={h.get('product')})")
+        _log(f"reuse server at {URL} (product={h.get('product')})")
         return None
     if _port_open(PORT):
         for _ in range(24):
             if _health_ok():
-                print(f"[xochipilli] reuse server at {URL} (became healthy)")
+                _log(f"reuse server at {URL} (became healthy)")
                 return None
             time.sleep(0.25)
         msg = (
-            f"ポート {PORT} は使われているが、Xochipilli の /api/health が応答しない。"
-            " 別アプリが占有しているか、前回のサーバが壊れている。"
+            f"ポート {PORT} は使われているが Xochipilli の /api/health が応答しない。"
         )
-        print(f"[xochipilli] WARN: {msg}", file=sys.stderr)
+        _log(f"WARN: {msg}")
         _alert(msg, critical=True)
 
     py = str(VENV_PY if VENV_PY.is_file() else sys.executable)
@@ -157,7 +175,7 @@ def _start_server() -> subprocess.Popen | None:
         "--app-dir",
         str(ROOT),
     ]
-    print(f"[xochipilli] starting {URL} …")
+    _log(f"starting {URL} …")
     proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
@@ -169,7 +187,7 @@ def _start_server() -> subprocess.Popen | None:
     )
     for _ in range(80):
         if _health_ok():
-            print("[xochipilli] server ready")
+            _log("server ready")
             return proc
         if proc.poll() is not None:
             err = ""
@@ -177,16 +195,11 @@ def _start_server() -> subprocess.Popen | None:
                 err = (proc.stderr.read() or "") if proc.stderr else ""
             except Exception:
                 err = ""
-            err_l = err.lower()
-            if "address already in use" in err_l or "errno 48" in err_l:
-                msg = f"起動失敗: ポート {PORT} が使用中。"
-            else:
-                msg = "ローカルサーバの起動に失敗した。Logs/Xochipilli/session.log を確認。"
-            print(f"[xochipilli] server exited early: {err[:400]}", file=sys.stderr)
-            _alert(msg, critical=True)
+            _log(f"server exited early: {err[:400]}")
+            _alert("ローカルサーバの起動に失敗した。session.log を確認。", critical=True)
             return proc
         time.sleep(0.15)
-    print("[xochipilli] server did not become healthy in time", file=sys.stderr)
+    _log("server did not become healthy in time")
     _alert(f"サーバが {URL} で準備完了しなかった。", critical=True)
     return proc
 
@@ -210,51 +223,121 @@ def _stop_server(proc: subprocess.Popen | None) -> None:
             proc.kill()
 
 
-# Chromium-based browsers: reliable --app= window for local FastAPI UI
-_CHROME_CANDIDATES = (
-    Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-    Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-    Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
-    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
-    Path("/Applications/Arc.app/Contents/MacOS/Arc"),
+_CHROME_BINS = (
+    ("Google Chrome", Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
+    ("Microsoft Edge", Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")),
+    ("Brave Browser", Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")),
+    ("Chromium", Path("/Applications/Chromium.app/Contents/MacOS/Chromium")),
+    ("Arc", Path("/Applications/Arc.app/Contents/MacOS/Arc")),
 )
 
 
-def _find_chromium() -> Path | None:
-    for p in _CHROME_CANDIDATES:
+def _find_chromium() -> tuple[str, Path] | None:
+    for name, p in _CHROME_BINS:
         if p.is_file():
-            return p
+            return name, p
     return None
 
 
-def _open_chromium_app(url: str) -> tuple[subprocess.Popen | None, str]:
-    """Open a frameless-ish app window. Returns (proc, engine_name)."""
-    chrome = _find_chromium()
-    if chrome is None:
-        return None, ""
-    profile = SUPPORT / "chrome-app-profile"
+def _profile_pids(profile: Path) -> list[int]:
+    """PIDs whose command line references this user-data-dir."""
+    needle = str(profile)
+    try:
+        r = subprocess.run(
+            ["pgrep", "-f", needle],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return []
+    if r.returncode not in (0, 1):
+        return []
+    out: list[int] = []
+    for line in (r.stdout or "").split():
+        try:
+            out.append(int(line))
+        except ValueError:
+            continue
+    return out
+
+
+def _wait_until_profile_quiet(profile: Path, *, grace_s: float = 1.25) -> None:
+    """Block while any process uses the Chrome profile. Survive parent handoff."""
+    # Appear
+    appeared = False
+    for _ in range(80):  # ~12s
+        pids = _profile_pids(profile)
+        if pids:
+            appeared = True
+            _log(f"profile live pids={pids[:8]}{'…' if len(pids) > 8 else ''}")
+            break
+        time.sleep(0.15)
+    if not appeared:
+        _log("WARN: no chromium profile process appeared")
+        return
+
+    # Stay until gone (with short grace so FS / process restart does not kill us)
+    gone_since: float | None = None
+    while True:
+        pids = _profile_pids(profile)
+        if pids:
+            gone_since = None
+        else:
+            now = time.monotonic()
+            if gone_since is None:
+                gone_since = now
+            elif now - gone_since >= grace_s:
+                _log("profile processes gone — UI closed")
+                return
+        time.sleep(0.4)
+
+
+def _open_chromium_app(url: str) -> bool:
+    found = _find_chromium()
+    if not found:
+        return False
+    name, binary = found
+    profile = CHROME_PROFILE
     profile.mkdir(parents=True, exist_ok=True)
     target = url if url.endswith("/") else url + "/"
-    cmd = [
-        str(chrome),
+
+    # Prefer macOS open -na (proper LaunchServices); also direct exec fallback.
+    args = [
         f"--app={target}",
         f"--user-data-dir={profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--new-window",
+        *_CHROME_BASE_FLAGS,
     ]
-    print(f"[xochipilli] chromium app mode: {chrome.name} → {target}")
+    extra = os.environ.get("XOCHIPILLI_CHROME_FLAGS", "").strip()
+    if extra:
+        args.extend(extra.split())
+
+    _log(f"chromium app mode: {name} → {target}")
+    _log(f"profile={profile}")
+
+    # Direct spawn WITHOUT start_new_session (avoids odd session/signal -5)
     try:
-        proc = subprocess.Popen(
-            cmd,
+        subprocess.Popen(
+            [str(binary), *args],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            start_new_session=False,
         )
-        return proc, chrome.name
     except OSError as e:
-        print(f"[xochipilli] chromium launch failed: {e}")
-        return None, ""
+        _log(f"direct chromium spawn failed: {e}; trying open -na")
+        try:
+            subprocess.run(
+                ["/usr/bin/open", "-na", name, "--args", *args],
+                check=False,
+                capture_output=True,
+            )
+        except OSError as e2:
+            _log(f"open -na failed: {e2}")
+            return False
+
+    print(f"[xochipilli] shell_mode=chromium-app engine={name}", flush=True)
+    _wait_until_profile_quiet(profile)
+    return True
 
 
 def _open_safari(url: str) -> bool:
@@ -265,15 +348,15 @@ def _open_safari(url: str) -> bool:
             check=False,
             capture_output=True,
         )
-        print(f"[xochipilli] opened Safari {target}")
+        _log(f"opened Safari {target}")
+        print("[xochipilli] shell_mode=safari", flush=True)
         return True
     except OSError as e:
-        print(f"[xochipilli] Safari open failed: {e}")
+        _log(f"Safari open failed: {e}")
         return False
 
 
 def _run_pywebview(url: str) -> int:
-    """Last resort. On this Mac WKWebView often painted pure white; kept for machines without Chrome."""
     try:
         import webview
     except ImportError:
@@ -281,19 +364,6 @@ def _run_pywebview(url: str) -> int:
         return 1
 
     target = url if url.endswith("/") else url + "/"
-    # Minimal inline page first so we never ship a white void if URL fails
-    splash = f"""<!DOCTYPE html><html><head><meta charset=utf-8>
-<style>html,body{{margin:0;height:100%;background:#0c0e12;color:#c9a227;
-font:15px system-ui;display:flex;align-items:center;justify-content:center}}
-a{{color:#e8d48b}}</style></head><body>
-<div style="text-align:center">
-<strong>Xochipilli</strong>
-<p style="opacity:.8;font-size:13px">Opening workbench…</p>
-<p><a href="{target}">Open manually</a></p>
-</div>
-<script>setTimeout(function(){{location.replace({target!r})}}, 50)</script>
-</body></html>"""
-
     kwargs = {
         "title": "Xochipilli",
         "url": target,
@@ -302,34 +372,15 @@ a{{color:#e8d48b}}</style></head><body>
         "min_size": (960, 640),
         "background_color": "#0c0e12",
         "text_select": True,
+        "resizable": True,
     }
     try:
-        window = webview.create_window(**kwargs)
+        webview.create_window(**kwargs)
     except TypeError:
         kwargs.pop("text_select", None)
-        try:
-            window = webview.create_window(**kwargs)
-        except Exception:
-            window = webview.create_window(title="Xochipilli", html=splash, width=1440, height=900)
+        webview.create_window(**kwargs)
 
-    print(f"[xochipilli] pywebview fallback url={target}")
-
-    def _shown() -> None:
-        try:
-            window.load_url(target)
-            print("[xochipilli] pywebview load_url", target)
-        except Exception as e:
-            print("[xochipilli] pywebview load_url failed", e)
-            try:
-                window.load_html(splash)
-            except Exception:
-                pass
-
-    try:
-        window.events.shown += _shown
-    except Exception:
-        pass
-
+    print("[xochipilli] shell_mode=pywebview-fallback", flush=True)
     storage = SUPPORT / "webview"
     storage.mkdir(parents=True, exist_ok=True)
     try:
@@ -350,62 +401,34 @@ def main() -> int:
     _load_dotenv()
     SUPPORT.mkdir(parents=True, exist_ok=True)
 
-    print(f"[xochipilli] desktop_app start pid={os.getpid()} py={sys.executable}")
-    print(f"[xochipilli] sys.path[0:4]={sys.path[:4]}")
+    _log(f"desktop_app start pid={os.getpid()} py={sys.executable}")
+    _log(f"sys.path[0:4]={sys.path[:4]}")
 
     server = _start_server()
     atexit.register(_stop_server, server)
 
     ok_http, http_msg = _preflight_http()
-    print(f"[xochipilli] preflight: {http_msg}")
+    _log(f"preflight: {http_msg}")
     if not ok_http:
         _alert(
             "ローカル UI に届かない。\n"
             f"{http_msg}\n"
-            "session.log を確認するか、ターミナルで ./RUN_ME.sh を試してください。",
+            "session.log を確認するか ./RUN_ME.sh を試してください。",
             critical=True,
         )
-        # still try to open — user may fix port
 
     target = f"{URL}/"
 
-    # --- Primary: Chromium --app= (avoids white WKWebView) ---
-    chrome_proc, engine = _open_chromium_app(target)
-    if chrome_proc is not None:
-        print(f"[xochipilli] shell_mode=chromium-app engine={engine} pid={chrome_proc.pid}")
-        # Keep this process alive while the app window runs so Dock treats us as open.
-        # Poll: if chrome exits quickly (<2s), fall through to other shells.
-        for i in range(20):
-            time.sleep(0.1)
-            if chrome_proc.poll() is not None:
-                print(f"[xochipilli] chromium exited early code={chrome_proc.returncode}")
-                break
-        else:
-            # Still running after 2s — wait until user closes the app window
-            print("[xochipilli] waiting for chromium app window to close…")
-            try:
-                chrome_proc.wait()
-            except KeyboardInterrupt:
-                chrome_proc.terminate()
-            print(f"[xochipilli] chromium closed code={chrome_proc.returncode}")
-            _stop_server(server)
-            return 0
-
-    # --- Secondary: Safari ---
-    if _open_safari(target):
-        print("[xochipilli] shell_mode=safari")
-        _alert(
-            "Chrome 系が使えなかったため Safari で開きました。\n"
-            f"{target}",
-            critical=False,
-        )
-        # Don't block forever on Safari; user has a browser tab.
-        time.sleep(1.5)
+    if _open_chromium_app(target):
         _stop_server(server)
         return 0
 
-    # --- Last resort: pywebview ---
-    print("[xochipilli] shell_mode=pywebview-fallback")
+    if _open_safari(target):
+        # Keep helper alive a bit so Dock bounce is not instant-death
+        time.sleep(2.0)
+        _stop_server(server)
+        return 0
+
     rc = _run_pywebview(target)
     _stop_server(server)
     return rc

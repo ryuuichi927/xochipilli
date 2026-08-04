@@ -45,6 +45,7 @@
 
 html, body {
   margin: 0;
+  width: 100%;
   height: 100%;
   background: var(--bg);
   color: var(--text);
@@ -54,8 +55,11 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+  /* Fill the real window (Chrome --app / fullscreen / resize) */
+  min-height: 100%;
   min-height: 100vh;
   min-height: 100dvh;
+  min-height: -webkit-fill-available;
   position: relative;
   /* deep night + warm gold dust (Xochipilli / flower-prince) */
   background:
@@ -224,8 +228,9 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Full-bleed workspace — music bar first */
 .layout {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  height: 100%;
   width: 100%;
   max-width: none;
   margin: 0;
@@ -233,6 +238,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   flex-direction: column;
   gap: 0.65rem;
   padding: 0.55rem 0.85rem 0.75rem;
+  overflow: hidden;
 }
 
 .layout-music-first .timeline-stage {
@@ -246,9 +252,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 .layout-music-first .wave-wrap {
+  /* vh tracks window height on resize / fullscreen */
   height: var(--wave-h);
-  min-height: 220px;
-  flex: 0 0 auto;
+  min-height: clamp(160px, 22vh, 220px);
+  max-height: min(48vh, 420px);
+  flex: 0 1 auto;
   border-width: 1.5px;
   border-color: #3a4558;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
