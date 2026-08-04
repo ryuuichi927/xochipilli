@@ -1,0 +1,21 @@
+{
+  "note": "Applied into static/i18n.js in same commit via agent; kept as audit trail",
+  "replacements": [
+    ["Xochipilli / ショチピリ — 音乐电影工作台", "Xochipilli — 音乐电影工作台"],
+    ["正本 docs/KEYS.md。建议只写在未采用栏；在明确采用前不实现。", "正式说明见 docs/KEYS.md。建议只写在「未采用」栏；明确采用前不要实现。"],
+    ["无钉 · 下次 P 开钉", "无标记点 · 下次 P 打开"],
+    ["开钉 @ {t} · 下次 P 关闭", "打开标记 @ {t} · 下次 P 关闭"],
+    ["取消开钉", "取消标记"],
+    ["点击定位/选区间。打钉用 P", "点击定位 / 选区间。打点用 P"],
+    ["点击波形定位，或点击区间框进入编辑。打钉用 P（播放头位置）。", "点击波形定位，或点击区间框进入编辑。打点用 P（播放头位置）。"],
+    ["Space · R · P 钉 · K · L · F · Tab · ⌘Z/Y · 滚轮 · 双击＝播放头（框内也可）", "Space · R · P 打点 · K · L · F · Tab · ⌘Z/Y · 滚轮 · 双击＝播放头（框内也可）"],
+    ["Space 播放 · R 曲头 · P 钉 · K 区间头 · L 循环 · F 适配 · Tab 下一段 · ⌘Z 撤销 · ⌘Y 重做 · ←/→ · +/- · 0 全览 · 双击定位 · Enter · Del", "Space 播放 · R 曲头 · P 打点 · K 区间头 · L 循环 · F 适配 · Tab 下一段 · ⌘Z 撤销 · ⌘Y 重做 · ←/→ · +/- · 0 全览 · 双击定位 · Enter · Del"],
+    ["还没有区间。点击时间线打钉。", "还没有区间。点击时间线打点。"],
+    ["开钉 @ {t}。再点一次关闭。", "打开标记 @ {t}。再点一次关闭。"],
+    ["打钉失败: {err}", "打点失败: {err}"],
+    ["已取消开钉", "已取消标记"]
+  ],
+  "en": [
+    ["statusGenWithRef: \"generated from attached image\"", "statusGenWithRef: \"Generated from attached image\""]
+  ]
+}
