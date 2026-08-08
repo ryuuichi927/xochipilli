@@ -6,7 +6,7 @@
   <title>ショチピリ</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
   <link rel="apple-touch-icon" href="/static/brand/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/static/style.css?v=ui5" />
+  <link rel="stylesheet" href="/static/style.css?v=ui6" />
   <link rel="stylesheet" href="/static/craft_ui.css?v=ui4" />
 </head>
 <body>
@@ -62,6 +62,16 @@
         <div id="playhead" class="playhead"></div>
         <div id="segmentsLayer" class="segments-layer"></div>
         <div id="openPinMark" class="open-pin hidden"></div>
+        <div id="candidatesLayer" class="candidates-layer" aria-hidden="true"></div>
+      </div>
+      <div class="digest-tools" id="digestTools">
+        <button id="btnApplyCandidates" type="button" class="ghost" data-i18n="btnApplyCandidates" disabled>区間候補を採用</button>
+        <label class="sync-label digest-opt">
+          <input id="replaceCandidates" type="checkbox" />
+          <span data-i18n="replaceCandidates">既存区間を置き換え</span>
+        </label>
+        <button id="btnExportOtio" type="button" class="ghost" data-i18n="btnExportOtio" disabled>OTIO 書き出し</button>
+        <span id="digestMeta" class="digest-meta mono"></span>
       </div>
       <div class="wave-scroll-row" id="waveScrollRow" hidden>
         <input id="waveScroll" type="range" min="0" max="1000" value="0" step="1" aria-label="timeline scroll" />
@@ -180,9 +190,9 @@
     </div>
   </div>
 
-  <script src="/static/lang_boot.js?v=ui5"></script>
-  <script src="/static/i18n.js?v=ui5"></script>
-  <script src="/static/app.js?v=ui5"></script>
+  <script src="/static/lang_boot.js?v=ui6"></script>
+  <script src="/static/i18n.js?v=ui6"></script>
+  <script src="/static/app.js?v=ui6"></script>
   <script src="/static/craft_ui.js?v=ui5"></script>
 </body>
 </html>

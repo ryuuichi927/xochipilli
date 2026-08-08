@@ -1,14 +1,16 @@
 {
   "theory_id": "digest_v0",
-  "label": "D1 thin digest (Eerola-adjacent + crossmodal starter)",
-  "notes": "Not a single Eerola theorem. Features chosen as implementable proxies for tempo/arousal, spectral brightness, low-high balance, and energy. Expand in D3.",
+  "label": "P0+ librosa digest (Eerola-adjacent signals + structure drafts)",
+  "notes": "Not a single Eerola theorem. librosa engine (2026-08). Features: tempo/beats, RMS, centroid, low-high, onset density, chroma; structure_candidates as drafts. Optional demucs/whisper/all-in-one.",
   "signals": [
     {"id": "tempo_bpm", "role": "pace / cut density bias"},
     {"id": "rms_mean", "role": "loudness / visual amplitude"},
     {"id": "rms_std", "role": "dynamic contrast"},
     {"id": "spectral_centroid_mean_hz", "role": "timbre brightness → visual lightness bias"},
     {"id": "low_high_ratio", "role": "bass vs treble balance"},
-    {"id": "onset_density", "role": "event density → motion grain"}
+    {"id": "onset_density", "role": "event density → motion grain"},
+    {"id": "structure_label", "role": "section draft label for MUSIC WINDOW"},
+    {"id": "music_summary", "role": "plain paragraph injected as MUSIC WINDOW"}
   ],
   "analysis_sr": 22050
 }

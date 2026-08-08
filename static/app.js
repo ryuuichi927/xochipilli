@@ -750,6 +750,10 @@ async function loadProject(id) {
   setStatus(
     p.digest ? t("statusDigested", { id: p.digest.theory_id }) : t("statusNoImport")
   );
+  ensureDigestExtras().then(() => {
+    renderGlobal();
+    renderWave();
+  }).catch(() => {});
   prefetchAdoptedClips().catch(() => {});
   refreshTasteHints().catch(() => {});
 }
@@ -764,6 +768,31 @@ function bindAudio(pid, hasSource) {
   }
   audio.src = apiUrl(`/api/projects/${pid}/audio?t=${Date.now()}`);
   audio.load();
+}
+
+async function ensureDigestExtras() {
+  if (!state.project?.id || !state.project?.digest) return;
+  const dig = state.project.digest;
+  if (Array.isArray(dig.structure_candidates) && dig.structure_candidates.length) {
+    updateDigestTools();
+    return;
+  }
+  try {
+    const full = await api(`/api/projects/${state.project.id}/digest/full`);
+    state.project.digest = {
+      ...dig,
+      structure_candidates: full.structure_candidates || [],
+      lyrics: full.lyrics || dig.lyrics || [],
+      stems: full.stems || dig.stems || {},
+      phase: full.phase || dig.phase,
+      beats: full.beats
+        ? { n: (full.beats.times || []).length, downbeats_n: (full.beats.downbeat_times || []).length, times: full.beats.times }
+        : dig.beats,
+      global: full.global || dig.global,
+      waveform_peaks: full.waveform_peaks || dig.waveform_peaks,
+    };
+  } catch (_) {}
+  updateDigestTools();
 }
 
 async function importFile(file) {
@@ -787,6 +816,8 @@ async function importFile(file) {
       sec: p.digest.global.duration_sec,
     })
   );
+  updateDigestTools();
+  renderCandidates();
 }
 
 function applyBarMode(mode) {
@@ -807,8 +838,12 @@ function applyBarMode(mode) {
 function renderGlobal() {
   const box = $("globalFeat");
   box.textContent = "";
-  const g = state.project?.digest?.global;
-  if (!g) return;
+  const dig = state.project?.digest;
+  const g = dig?.global;
+  if (!g) {
+    updateDigestTools();
+    return;
+  }
   const entries = [
     ["tempo", `${g.tempo_bpm} BPM`],
     ["centroid", `${g.spectral_centroid_mean_hz} Hz`],
@@ -816,11 +851,127 @@ function renderGlobal() {
     ["onset", g.onset_density],
     ["RMS", g.rms_mean],
   ];
+  if (g.engine) entries.unshift(["engine", g.engine]);
+  const bn = dig?.beats?.n ?? dig?.beats?.times?.length;
+  if (bn != null) entries.push(["beats", bn]);
+  const nc = (dig?.structure_candidates || []).length;
+  if (nc) entries.push(["candidates", nc]);
   for (const [k, v] of entries) {
     const s = document.createElement("span");
-    s.className = "chip";
+    s.className = "chip" + (k === "engine" ? " chip-engine" : k === "candidates" ? " chip-cand" : "");
     s.textContent = `${k}: ${v}`;
     box.appendChild(s);
+  }
+  updateDigestTools();
+}
+
+function structureCandidates() {
+  const dig = state.project?.digest;
+  if (!dig) return [];
+  if (Array.isArray(dig.structure_candidates) && dig.structure_candidates.length) {
+    return dig.structure_candidates;
+  }
+  return [];
+}
+
+function updateDigestTools() {
+  const has = !!state.project?.digest;
+  const n = structureCandidates().length;
+  const ba = $("btnApplyCandidates");
+  const bo = $("btnExportOtio");
+  if (ba) ba.disabled = !has || n < 1;
+  if (bo) bo.disabled = !has;
+  const meta = $("digestMeta");
+  if (meta) {
+    if (!has) {
+      meta.textContent = "";
+    } else {
+      const eng = state.project.digest?.global?.engine || "?";
+      const phase = state.project.digest?.phase?.p1_structure_engine || "";
+      meta.textContent = t("digestMetaLine", { n, eng, phase: phase || "—" });
+    }
+  }
+}
+
+function renderCandidates() {
+  const layer = $("candidatesLayer");
+  if (!layer) return;
+  layer.textContent = "";
+  const cands = structureCandidates();
+  for (const c of cands) {
+    const t0 = Number(c.t0);
+    const t1 = Number(c.t1);
+    if (!(t1 > t0)) continue;
+    const r0 = timeToXRatio(t0);
+    const r1 = timeToXRatio(t1);
+    if (r1 < 0 || r0 > 1) continue;
+    const el = document.createElement("div");
+    el.className = "cand-band";
+    el.style.left = Math.max(0, r0) * 100 + "%";
+    el.style.width = Math.max(0.2, Math.min(1, r1) - Math.max(0, r0)) * 100 + "%";
+    el.title = `${c.label || "section"} ${fmt(t0)}–${fmt(t1)} (${c.source || "?"})`;
+    const lab = document.createElement("span");
+    lab.className = "cand-lab";
+    lab.textContent = c.label || "§";
+    el.appendChild(lab);
+    layer.appendChild(el);
+  }
+}
+
+async function applyStructureCandidates() {
+  if (!state.project?.id) return;
+  const n = structureCandidates().length;
+  if (!n) {
+    setStatus(t("statusNoCandidates"));
+    return;
+  }
+  const replace = !!$("replaceCandidates")?.checked;
+  setStatus(t("statusApplyingCandidates"));
+  const body = { replace, min_duration: 1.0 };
+  const res = await api(`/api/projects/${state.project.id}/structure/apply-candidates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  state.project = res.project || state.project;
+  if (res.project) {
+    // keep candidates on project if stripped — reload digest light fields
+    if (!state.project.digest?.structure_candidates?.length) {
+      try {
+        const full = await api(`/api/projects/${state.project.id}/digest/full`);
+        state.project.digest = {
+          ...(state.project.digest || {}),
+          structure_candidates: full.structure_candidates || [],
+          beats: full.beats
+            ? { n: (full.beats.times || []).length, times: full.beats.times }
+            : state.project.digest?.beats,
+          phase: full.phase || state.project.digest?.phase,
+          global: full.global || state.project.digest?.global,
+        };
+      } catch (_) {}
+    }
+  }
+  pushHistory("apply-candidates");
+  renderGlobal();
+  renderWave();
+  renderSegments();
+  setStatus(t("statusCandidatesApplied", { n: res.created ?? n }));
+}
+
+async function exportOtio() {
+  if (!state.project?.id) return;
+  setStatus(t("statusOtioExporting"));
+  try {
+    await api(`/api/projects/${state.project.id}/export/otio`, { method: "POST" });
+    const a = document.createElement("a");
+    a.href = apiUrl(`/api/projects/${state.project.id}/export/otio/download?t=${Date.now()}`);
+    a.download = `${state.project.id}.otio`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setStatus(t("statusOtioOk"));
+  } catch (e) {
+    setStatus(t("statusOtioFail", { err: e.message || e }));
   }
 }
 
@@ -1475,6 +1626,7 @@ function renderWave() {
     }
   }
 
+  renderCandidates();
   const layer = $("segmentsLayer");
   layer.textContent = "";
   for (const s of state.project?.segments || []) {
@@ -3436,6 +3588,14 @@ function wire() {
   const bex = $("btnExportProgram");
   if (bex) {
     bex.onclick = () => exportProgramStitch().catch((e) => setStatus(e.message));
+  }
+  const bApply = $("btnApplyCandidates");
+  if (bApply) {
+    bApply.onclick = () => applyStructureCandidates().catch((e) => setStatus(e.message));
+  }
+  const bOtio = $("btnExportOtio");
+  if (bOtio) {
+    bOtio.onclick = () => exportOtio().catch((e) => setStatus(e.message));
   }
   const bCanva = $("btnCanvaSend");
   if (bCanva) {

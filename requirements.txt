@@ -8,3 +8,12 @@ httpx>=0.27
 pydantic>=2.0
 python-dotenv>=1.0
 pywebview>=5.0
+librosa>=0.10
+opentimelineio>=0.17
+scenedetect>=0.6
+opencv-python>=4.8
+# optional heavy (not required for default path):
+# demucs
+# openai-whisper
+# allin1
+# mir_eval

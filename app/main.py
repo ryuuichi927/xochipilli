@@ -27,7 +27,7 @@ from .video_gen import (
     xai_max_single_seconds,
     xfade_seconds,
 )
-from .digest import digest_audio, segment_features
+from .digest import digest_audio, segment_features, candidates_to_segments_payload
 from .emotion import emotion_keywords
 from .mapping import build_constraints, compose_video_prompt
 from .paths import ROOT, STATIC
@@ -35,6 +35,8 @@ from . import storage
 from . import craft
 from . import taste as taste_mod
 from .program_export import build_program_mp4
+from . import otio_export
+from . import scene_marks as scene_marks_mod
 
 # Load project .env (FAL_KEY, VIDEO_PROVIDER, …). Does not override already-set env.
 load_dotenv(ROOT / ".env", override=False)
@@ -325,6 +327,14 @@ async def api_import(pid: str, file: UploadFile = File(...)):
         "waveform_peaks": digest["waveform_peaks"],
         "analysis_wav": digest["analysis_wav"],
         "series_file": "digest.json",
+        "beats": {
+            "n": len((digest.get("beats") or {}).get("times") or []),
+            "downbeats_n": len((digest.get("beats") or {}).get("downbeat_times") or []),
+        },
+        "structure_candidates": digest.get("structure_candidates") or [],
+        "lyrics": digest.get("lyrics") or [],
+        "stems": digest.get("stems") or {},
+        "phase": digest.get("phase") or {},
     }
     p["segments"] = []
     p["open_pin"] = None
@@ -403,6 +413,149 @@ def api_pin_cancel(pid: str):
     p = _proj(pid)
     p["open_pin"] = None
     return storage.public_project(storage.save_project(p))
+
+
+class ApplyCandidatesBody(BaseModel):
+    """P1: promote structure_candidates into real segments (draft pins)."""
+    replace: bool = False
+    min_duration: float = 1.0
+
+
+@app.get("/api/projects/{pid}/digest/full")
+def api_digest_full(pid: str):
+    """Dev/UI: structure candidates, beat counts, lyrics (series stripped)."""
+    p = _proj(pid, with_series=True)
+    dig = storage.load_digest_file(pid) or p.get("digest") or {}
+    if not isinstance(dig, dict):
+        raise HTTPException(404, "no digest")
+    out = {k: v for k, v in dig.items() if k != "series"}
+    return out
+
+
+@app.post("/api/projects/{pid}/structure/apply-candidates")
+def api_apply_structure_candidates(pid: str, body: ApplyCandidatesBody = ApplyCandidatesBody()):
+    """Turn digest structure_candidates into editable segments (does not auto-generate video)."""
+    p = _proj(pid, with_series=True)
+    dig = storage.load_digest_file(pid)
+    if not dig:
+        raise HTTPException(400, "import audio first")
+    # merge series into dig for features
+    if p.get("digest") and isinstance(p["digest"], dict):
+        dig = {**dig, **{k: p["digest"].get(k) for k in ()}}
+        if p["digest"].get("series"):
+            dig["series"] = p["digest"]["series"]
+        else:
+            dig = storage.attach_series({"id": pid, "digest": dig})["digest"]
+
+    cands = candidates_to_segments_payload(dig)
+    if not cands:
+        raise HTTPException(400, "no structure_candidates")
+
+    if body.replace:
+        p["segments"] = []
+        p["open_pin"] = None
+
+    created = []
+    min_d = max(0.2, float(body.min_duration))
+    for c in cands:
+        t0 = float(c.get("t0") or 0)
+        t1 = float(c.get("t1") or 0)
+        if t1 - t0 < min_d:
+            continue
+        feat = segment_features(dig, t0, t1)
+        kws = emotion_keywords(feat)
+        constraints = build_constraints(feat)
+        seg_id = uuid.uuid4().hex[:10]
+        seg = {
+            "id": seg_id,
+            "t0": round(t0, 3),
+            "t1": round(t1, 3),
+            "features": feat,
+            "emotion_keywords": kws,
+            "constraints": constraints,
+            "prompt": "",
+            "video": None,
+            "unmatched": False,
+            "from_candidate": True,
+            "candidate_label": c.get("label"),
+            "candidate_source": c.get("source"),
+        }
+        craft.enrich_new_segment(seg)
+        p["segments"].append(seg)
+        created.append(seg)
+
+    storage.save_project(p)
+    return {
+        "status": "ok",
+        "created": len(created),
+        "segments": created,
+        "project": storage.public_project(p),
+    }
+
+
+@app.post("/api/projects/{pid}/export/otio")
+def api_export_otio(pid: str):
+    """P3.2 OTIO export."""
+    p = _proj(pid)
+    pdir = storage.project_dir(pid)
+    out = pdir / "export.otio"
+    try:
+        otio_export.export_project_otio(p, pdir, out)
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+    return {"ok": True, "file": out.name, "path": str(out)}
+
+
+@app.get("/api/projects/{pid}/export/otio/download")
+def api_export_otio_download(pid: str):
+    pdir = storage.project_dir(pid)
+    path = pdir / "export.otio"
+    if not path.exists():
+        # build on the fly
+        p = _proj(pid)
+        try:
+            otio_export.export_project_otio(p, pdir, path)
+        except Exception as e:
+            raise HTTPException(500, str(e)) from e
+    return FileResponse(path, filename=f"{pid}.otio", media_type="application/octet-stream")
+
+
+@app.post("/api/projects/{pid}/segments/{sid}/scene-marks")
+def api_scene_marks(pid: str, sid: str):
+    """P3.3 PySceneDetect on adopted/first clip of segment."""
+    p = _proj(pid)
+    seg = None
+    for s in p.get("segments") or []:
+        if s.get("id") == sid:
+            seg = s
+            break
+    if not seg:
+        raise HTTPException(404, "segment not found")
+    clips_dir = storage.project_dir(pid) / "clips"
+    video_path = None
+    v = seg.get("video") if isinstance(seg.get("video"), dict) else {}
+    clips = (v or {}).get("clips") or seg.get("clips") or []
+    if isinstance(clips, list) and clips:
+        c0 = clips[0]
+        name = c0.get("file") if isinstance(c0, dict) else None
+        if name:
+            cand = clips_dir / str(name)
+            if cand.exists():
+                video_path = cand
+    if video_path is None:
+        # any mp4 for segment id
+        for cand in sorted(clips_dir.glob(f"{sid}*.mp4")):
+            video_path = cand
+            break
+    if video_path is None or not video_path.exists():
+        raise HTTPException(400, "no clip video for segment")
+    try:
+        marks = scene_marks_mod.detect_scenes(video_path)
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
+    seg["scene_marks"] = marks
+    storage.save_project(p)
+    return {"segment_id": sid, "file": video_path.name, "marks": marks}
 
 
 @app.put("/api/projects/{pid}/segments/{sid}/prompt")

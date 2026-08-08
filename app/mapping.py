@@ -167,6 +167,15 @@ def compose_video_prompt(
             "The full description below is for context only; act solely within this window."
         )
 
+    # P2 MUSIC WINDOW — music facts from digest (soft; user prompt still wins)
+    music_summary = str(feat.get("music_summary") or "").strip()
+    if music_summary:
+        parts.append(
+            "MUSIC WINDOW — Musical facts for this segment (soft bias; "
+            "do not override explicit user intent or STYLE LOCK):\n"
+            + music_summary
+        )
+
     if lock:
         parts.append(CAMERA_LOCK_TEXT)
 

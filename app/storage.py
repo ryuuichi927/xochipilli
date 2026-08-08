@@ -90,7 +90,17 @@ def attach_series(data: dict[str, Any]) -> dict[str, Any]:
         dig2 = dict(dig)
         dig2["series"] = file_dig["series"]
         # fill missing light fields from file if needed
-        for k in ("global", "waveform_peaks", "theory_id", "analysis_wav"):
+        for k in (
+            "global",
+            "waveform_peaks",
+            "theory_id",
+            "analysis_wav",
+            "beats",
+            "structure_candidates",
+            "lyrics",
+            "stems",
+            "phase",
+        ):
             if dig2.get(k) is None and file_dig.get(k) is not None:
                 dig2[k] = file_dig[k]
         data = dict(data)

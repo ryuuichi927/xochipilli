@@ -1502,3 +1502,38 @@ video#video {
   color:#f0e2a8;
   letter-spacing:0.03em;
 }
+
+/* P1 structure candidates + digest tools */
+.candidates-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.cand-band {
+  position: absolute;
+  top: 8%; bottom: 55%;
+  background: color-mix(in srgb, #c9a227 18%, transparent);
+  border: 1px dashed rgba(201, 162, 39, 0.65);
+  border-radius: 3px;
+  pointer-events: none;
+  overflow: hidden;
+}
+.cand-band .cand-lab {
+  position: absolute;
+  left: 3px; top: 1px;
+  font-size: 10px;
+  color: rgba(240, 220, 160, 0.9);
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  max-width: 96%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.digest-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.35rem 0.5rem 0.15rem;
+}
+.digest-tools .ghost[disabled] { opacity: 0.4; }
+.digest-opt { font-size: 0.85rem; opacity: 0.9; }
+.digest-meta { font-size: 0.78rem; opacity: 0.75; margin-left: auto; }
+.chip.chip-engine { border-color: rgba(126, 182, 214, 0.5); }
+.chip.chip-cand { border-color: rgba(201, 162, 39, 0.55); }
