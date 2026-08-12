@@ -3,7 +3,7 @@
 **English** | [日本語](README.ja.md) | [中文](README.zh.md)
 
 Local, **pro-oriented** music → film workbench for your Mac.  
-The name comes from the Aztec deity **Xochipilli** (“Flower Prince”) — god of flowers, song, music, and art. The editor stays quiet; the track’s world opens into picture, segment by segment.
+The name comes from the Aztec deity **Xochipilli** 
 
 Designed by **Ryuichi Hamakawa**.
 
