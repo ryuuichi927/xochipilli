@@ -24,6 +24,15 @@ function apiBase() {
   return "";
 }
 
+function apiToken() {
+  try {
+    if (typeof window !== "undefined" && window.__XOCHI_API_TOKEN__) {
+      return String(window.__XOCHI_API_TOKEN__);
+    }
+  } catch (_) {}
+  return "";
+}
+
 function apiUrl(path) {
   if (path == null || path === "") return path;
   const s = String(path);
@@ -37,6 +46,7 @@ function apiUrl(path) {
 try {
   window.apiUrl = apiUrl;
   window.apiBase = apiBase;
+  window.apiToken = apiToken;
 } catch (_) {}
 
 const state = {
@@ -646,7 +656,15 @@ async function deleteProjectUi(pid, title) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch(apiUrl(path), opts);
+  const next = { ...opts };
+  const headers = new Headers(opts.headers || {});
+  const method = String(opts.method || "GET").toUpperCase();
+  const tok = apiToken();
+  if (tok && method !== "GET" && method !== "HEAD" && !headers.has("X-Xochi-Token")) {
+    headers.set("X-Xochi-Token", tok);
+  }
+  next.headers = headers;
+  const res = await fetch(apiUrl(path), next);
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -2558,14 +2576,18 @@ async function generateSeg(sid, promptText) {
     const ch = data.clip?.chained || data.segment?.video?.chained;
     const uref = data.clip?.user_ref_image || data.segment?.video?.user_ref_image;
     const clock = data.clip?.camera_lock || data.segment?.camera_lock;
-    const base = t("statusGenOk", { provider: data.segment.video?.provider || "?" });
+    const partial = !!(data.partial || data.clip?.partial || data.segment?.video?.partial);
+    const base = partial
+      ? t("statusGenPartial", { provider: data.segment.video?.provider || "?" })
+      : t("statusGenOk", { provider: data.segment.video?.provider || "?" });
     let msg = base;
     if (uref) msg += " · " + t("statusGenWithRef");
     else if (ch) msg += " · " + t("statusChain");
     if (clock) msg += " · " + t("statusCameraLockOn");
+    if (partial && data.clip?.note) msg += " · " + String(data.clip.note).slice(0, 80);
     setStatus(msg);
     commitHistory("generate");
-    ok = true;
+    ok = !partial;
   } catch (e) {
     setStatus(t("statusGenFail", { err: e.message }));
     ok = false;

@@ -16,6 +16,42 @@ static void die(const char *msg) {
     exit(1);
 }
 
+/* Read Contents/Resources/ProjectRoot (one line = absolute project root). */
+static int read_project_root(const char *exe_resolved, char *out, size_t out_sz) {
+    char res_path[PATH_MAX];
+    char dir[PATH_MAX];
+    strncpy(dir, exe_resolved, sizeof(dir) - 1);
+    dir[sizeof(dir) - 1] = '\0';
+    char *slash = strrchr(dir, '/');
+    if (!slash) {
+        return -1;
+    }
+    *slash = '\0'; /* .../Contents/MacOS */
+    slash = strrchr(dir, '/');
+    if (!slash) {
+        return -1;
+    }
+    *slash = '\0'; /* .../Contents */
+    snprintf(res_path, sizeof(res_path), "%s/Resources/ProjectRoot", dir);
+
+    FILE *f = fopen(res_path, "r");
+    if (!f) {
+        return -1;
+    }
+    if (!fgets(out, (int)out_sz, f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+    /* trim CR/LF and trailing spaces */
+    size_t n = strlen(out);
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' ' ||
+                     out[n - 1] == '\t')) {
+        out[--n] = '\0';
+    }
+    return (n > 0 && out[0] == '/') ? 0 : -1;
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -30,15 +66,17 @@ int main(int argc, char **argv) {
         resolved[sizeof(resolved) - 1] = '\0';
     }
 
-    const char *root =
-        "/path/to/xochipilli";
+    char root[PATH_MAX];
+    if (read_project_root(resolved, root, sizeof(root)) != 0) {
+        die("cannot read Contents/Resources/ProjectRoot");
+    }
     if (chdir(root) != 0) {
         die("chdir project root failed");
     }
 
-    setenv("VIRTUAL_ENV",
-           "/path/to/xochipilli/.venv",
-           1);
+    char venv[PATH_MAX];
+    snprintf(venv, sizeof(venv), "%s/.venv", root);
+    setenv("VIRTUAL_ENV", venv, 1);
     unsetenv("PYTHONPATH");
     unsetenv("PYTHONHOME");
     setenv("PYTHONUNBUFFERED", "1", 1);
@@ -62,8 +100,8 @@ int main(int argc, char **argv) {
         }
         FILE *lf = fopen(logpath, "a");
         if (lf) {
-            fprintf(lf, "==== mach-o launcher pid=%d exe=%s ====\n", getpid(),
-                    resolved);
+            fprintf(lf, "==== mach-o launcher pid=%d exe=%s root=%s ====\n", getpid(),
+                    resolved, root);
             fflush(lf);
             dup2(fileno(lf), STDOUT_FILENO);
             dup2(fileno(lf), STDERR_FILENO);
@@ -82,16 +120,22 @@ int main(int argc, char **argv) {
         die("Py_Initialize failed");
     }
 
-    int rc = PyRun_SimpleString(
+    /* Build Python bootstrap with runtime root (no hardcoded user path). */
+    char py[PATH_MAX * 3];
+    snprintf(
+        py, sizeof(py),
         "import sys, os\n"
-        "root = r'/path/to/xochipilli'\n"
+        "root = r'%s'\n"
         "venv_site = root + r'/.venv/lib/python3.11/site-packages'\n"
         "sys.path.insert(0, root)\n"
         "if venv_site not in sys.path:\n"
         "    sys.path.insert(0, venv_site)\n"
         "os.chdir(root)\n"
         "import desktop_app\n"
-        "raise SystemExit(desktop_app.main())\n");
+        "raise SystemExit(desktop_app.main())\n",
+        root);
+
+    int rc = PyRun_SimpleString(py);
 
     if (Py_FinalizeEx() < 0) {
         return 120;

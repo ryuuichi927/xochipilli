@@ -184,11 +184,11 @@ def _cors_ok() -> bool:
         return False
 
 
-def _kill_listeners_on_port(port: int) -> None:
-    """Best-effort free PORT so we can restart with updated CORS middleware."""
+def _kill_our_listeners_on_port(port: int) -> None:
+    """Stop only Xochipilli/uvicorn listeners on PORT — never SIGKILL strangers."""
     try:
         r = subprocess.run(
-            ["lsof", "-ti", f"tcp:{port}", f"-sTCP:LISTEN"],
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             check=False,
@@ -196,10 +196,31 @@ def _kill_listeners_on_port(port: int) -> None:
     except OSError as e:
         _log(f"lsof port {port}: {e}")
         return
-    pids = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip().isdigit()]
+    pids: list[str] = []
+    for ln in (r.stdout or "").splitlines()[1:]:
+        parts = ln.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            continue
+        pid = parts[1]
+        cmd = " ".join(parts[8:]) if len(parts) > 8 else parts[0]
+        low = cmd.lower()
+        if any(
+            m in low
+            for m in (
+                "uvicorn",
+                "app.server",
+                "desktop_app",
+                "xochipilli",
+                "music-film-workbench",
+            )
+        ):
+            pids.append(pid)
+        else:
+            _log(f"leave foreign listener pid={pid} cmd={cmd[:80]}")
     if not pids:
+        _log(f"no Xochipilli listeners on :{port} to stop")
         return
-    _log(f"stopping listeners on :{port} pids={pids[:12]}")
+    _log(f"stopping our listeners on :{port} pids={pids[:12]}")
     for pid in pids:
         try:
             os.kill(int(pid), signal.SIGTERM)
@@ -211,6 +232,37 @@ def _kill_listeners_on_port(port: int) -> None:
             os.kill(int(pid), signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError, ValueError):
             pass
+
+
+def _ensure_media_path(env: dict[str, str]) -> None:
+    """Dock launches often omit Homebrew — put ffmpeg/ffprobe on PATH."""
+    extras = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        str(Path.home() / ".local/bin"),
+    ]
+    cur = env.get("PATH") or os.environ.get("PATH") or ""
+    parts = [p for p in cur.split(":") if p]
+    for p in reversed(extras):
+        if p not in parts:
+            parts.insert(0, p)
+    env["PATH"] = ":".join(parts)
+
+
+def _ensure_api_token() -> str:
+    tok = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
+    if not tok:
+        tok = os.urandom(16).hex()
+        os.environ["XOCHIPILLI_API_TOKEN"] = tok
+        _log("generated XOCHIPILLI_API_TOKEN for this session")
+    return tok
+
+
+def _token_compatible(h: dict | None) -> bool:
+    """Reuse only if live server token posture matches ours."""
+    want = bool((os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip())
+    have = bool((h or {}).get("api_token_required"))
+    return want == have
 
 
 def _preflight_http() -> tuple[bool, str]:
@@ -228,35 +280,46 @@ def _preflight_http() -> tuple[bool, str]:
 
 
 def _start_server() -> subprocess.Popen | None:
+    _ensure_api_token()
     if _health_ok():
-        if _cors_ok():
-            h = _health_payload() or {}
-            _log(f"reuse server at {URL} (product={h.get('product')}, cors=ok)")
+        h = _health_payload() or {}
+        if _cors_ok() and _token_compatible(h):
+            _log(
+                f"reuse server at {URL} (product={h.get('product')}, cors=ok, "
+                f"token_required={h.get('api_token_required')})"
+            )
             return None
-        _log("reuse blocked: live server missing CORS for about:blank — restarting")
-        _kill_listeners_on_port(PORT)
+        _log("reuse blocked: CORS/token mismatch — restarting our listeners")
+        _kill_our_listeners_on_port(PORT)
         time.sleep(0.35)
     elif _port_open(PORT):
         for _ in range(24):
             if _health_ok():
-                if _cors_ok():
-                    _log(f"reuse server at {URL} (became healthy, cors=ok)")
+                h = _health_payload() or {}
+                if _cors_ok() and _token_compatible(h):
+                    _log(f"reuse server at {URL} (became healthy, cors/token ok)")
                     return None
-                _log("port open + healthy but no CORS — restarting")
-                _kill_listeners_on_port(PORT)
+                _log("port open + healthy but CORS/token mismatch — restarting")
+                _kill_our_listeners_on_port(PORT)
                 time.sleep(0.35)
                 break
             time.sleep(0.25)
         else:
-            msg = f"ポート {PORT} は使用中だが Xochipilli の /api/health が応答しない。"
+            msg = (
+                f"ポート {PORT} は使用中だが Xochipilli の /api/health が応答しない。"
+                " 別アプリの可能性があるため終了します。"
+            )
             _log(f"WARN: {msg}")
             _alert(msg, critical=True)
+            raise SystemExit(2)
 
     py = str(VENV_PY if VENV_PY.is_file() else sys.executable)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     env.setdefault("VIDEO_PROVIDER", env.get("VIDEO_PROVIDER", "mock"))
+    env["XOCHIPILLI_API_TOKEN"] = _ensure_api_token()
+    _ensure_media_path(env)
     cmd = [
         py,
         "-m",
@@ -269,13 +332,17 @@ def _start_server() -> subprocess.Popen | None:
         "--app-dir",
         str(ROOT),
     ]
+    SESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
     _log(f"starting {URL} …")
+    log_f = open(SESSION_LOG, "a", encoding="utf-8", errors="replace")
+    log_f.write(f"\n==== uvicorn spawn pid_parent={os.getpid()} ====\n")
+    log_f.flush()
     proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stdout=log_f,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
         text=True,
     )
@@ -287,12 +354,7 @@ def _start_server() -> subprocess.Popen | None:
                 _log("WARN: server up but CORS headers still missing")
             return proc
         if proc.poll() is not None:
-            err = ""
-            try:
-                err = (proc.stderr.read() or "") if proc.stderr else ""
-            except Exception:
-                err = ""
-            _log(f"server exited early: {err[:400]}")
+            _log("server exited early — see session.log")
             _alert("ローカルサーバの起動に失敗した。session.log を確認。", critical=True)
             return proc
         time.sleep(0.15)
@@ -366,9 +428,9 @@ def _activate_cocoa(*, force: bool = False) -> None:
 
 
 def _webview_debug_enabled() -> bool:
-    """Default ON for diagnosis. Off: XOCHIPILLI_WEBVIEW_DEBUG=0."""
-    v = (os.environ.get("XOCHIPILLI_WEBVIEW_DEBUG") or "1").strip().lower()
-    return v not in ("0", "false", "no", "off")
+    """Default OFF for Dock product builds. On: XOCHIPILLI_WEBVIEW_DEBUG=1."""
+    v = (os.environ.get("XOCHIPILLI_WEBVIEW_DEBUG") or "0").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 def _skip_pywebview_inject_enabled() -> bool:
@@ -620,6 +682,9 @@ def _http_json(method: str, path: str, *, data: bytes | None = None, content_typ
     headers = {}
     if content_type:
         headers["Content-Type"] = content_type
+    tok = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
+    if tok and method.upper() not in ("GET", "HEAD"):
+        headers["X-Xochi-Token"] = tok
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=120) as r:
         raw = r.read()
@@ -633,7 +698,13 @@ def _http_json(method: str, path: str, *, data: bytes | None = None, content_typ
 
 def _multipart_file(field: str, file_path: Path) -> tuple[bytes, str]:
     boundary = f"----xochi{os.getpid()}{int(time.time())}"
-    name = file_path.name
+    # Escape quotes / CR in filename for multipart header safety
+    name = (
+        file_path.name.replace("\\", "_")
+        .replace('"', "_")
+        .replace("\r", "_")
+        .replace("\n", "_")
+    )
     body = file_path.read_bytes()
     # naive mime
     suffix = file_path.suffix.lower()
@@ -687,7 +758,7 @@ def _native_import_track(window) -> None:
         return
     _log(f"native import start path={path}")
     try:
-        # Prefer currently selected project from the DOM; else first / create.
+        # Require currently selected project — never auto-target "richest".
         pid = None
         try:
             pid = _timed_evaluate_js(
@@ -705,27 +776,11 @@ def _native_import_track(window) -> None:
         else:
             pid = None
         if not pid:
-            listing = _http_json("GET", "/api/projects") or {}
-            projects = listing.get("projects") or []
-            if projects:
-                # Prefer Bonji / richest project for default target when none selected
-                ranked = sorted(
-                    projects,
-                    key=lambda p: (
-                        int(p.get("segment_count") or 0) * 10
-                        + (1 if p.get("duration_sec") else 0)
-                    ),
-                    reverse=True,
-                )
-                pid = ranked[0]["id"]
-            else:
-                created = _http_json(
-                    "POST",
-                    "/api/projects",
-                    data=b"title=Untitled",
-                    content_type="application/x-www-form-urlencoded",
-                )
-                pid = created["id"]
+            _alert(
+                "曲を導入するプロジェクトを選んでから、もう一度「曲を導入…」を実行してください。",
+                critical=True,
+            )
+            return
         body, ctype = _multipart_file("file", path)
         result = _http_json(
             "POST",
@@ -757,6 +812,7 @@ def _install_file_menu(window) -> None:
     """Menu File → 曲を導入… (⌘O) — backup when HTML file input fails on about:blank."""
     try:
         from AppKit import NSApp, NSMenu, NSMenuItem, NSEventModifierFlagCommand
+        from PyObjCTools import AppHelper
     except Exception as e:
         _log(f"file menu skipped (AppKit): {e}")
         return
@@ -777,12 +833,17 @@ def _install_file_menu(window) -> None:
     class _FileTarget(object):
         def importTrack_(self, _sender) -> None:
             _log("file menu: Import track")
-            threading.Thread(
-                target=_native_import_track,
-                args=(window,),
-                name="xochi-import",
-                daemon=True,
-            ).start()
+            # Keep dialog/evaluate_js on main thread; only HTTP stays sync here.
+            def _run() -> None:
+                try:
+                    _native_import_track(window)
+                except Exception as e:
+                    _log(f"importTrack main-thread failed: {e}")
+
+            try:
+                AppHelper.callAfter(_run)
+            except Exception:
+                _run()
 
         def reloadProjects_(self, _sender) -> None:
             _log("file menu: Reload projects")
@@ -792,11 +853,10 @@ def _install_file_menu(window) -> None:
                 "return refreshProjectList().then(function(d){"
                 "var ps=(d&&d.projects)||[];"
                 "if(ps.length&&typeof loadProject==='function'){"
-                "var ranked=ps.slice().sort(function(a,b){"
-                "var sa=(a.segment_count||0)*10+(a.duration_sec?1:0);"
-                "var sb=(b.segment_count||0)*10+(b.duration_sec?1:0);"
-                "return sb-sa;});"
-                "return loadProject(ranked[0].id);"
+                "var cur=(window.state&&window.state.project&&window.state.project.id)||'';"
+                "var id=cur;"
+                "if(!id){var s=document.getElementById('projectSelect');id=(s&&s.value)||ps[0].id;}"
+                "return loadProject(id);"
                 "}"
                 "});}"
                 "return 'no-fn';}catch(e){return String(e);}})()"
@@ -1015,9 +1075,11 @@ def _build_shell_html(base: str) -> tuple[str, str]:
 
     # about:blank document: relative fetch("/api/...") fails — pin absolute API origin.
     api_origin = base.rstrip("/")
+    api_token = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
     boot_js = (
         "<script>"
         f"window.__XOCHI_API_BASE__={json.dumps(api_origin)};"
+        f"window.__XOCHI_API_TOKEN__={json.dumps(api_token)};"
         "</script>"
     )
     if "__XOCHI_API_BASE__" not in html:
@@ -1028,7 +1090,16 @@ def _build_shell_html(base: str) -> tuple[str, str]:
             count=1,
             flags=re.I,
         )
-        _log(f"shell html: injected __XOCHI_API_BASE__={api_origin}")
+        _log(f"shell html: injected __XOCHI_API_BASE__={api_origin} token={'yes' if api_token else 'no'}")
+    elif "__XOCHI_API_TOKEN__" not in html and api_token:
+        html = re.sub(
+            r"(<head[^>]*>)",
+            rf"\1\n{boot_js}",
+            html,
+            count=1,
+            flags=re.I,
+        )
+        _log("shell html: injected __XOCHI_API_TOKEN__")
 
     # Scripts/assets must stay http absolute so load_html origin can fetch them.
     for q in ('"', "'"):
@@ -1280,15 +1351,27 @@ def _run_pywebview(target: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _run_browser_only(target: str) -> int:
-    _log(f"shell_mode=browser (explicit) → {target}")
+def _run_browser_only(target: str, *, keep_server: bool) -> int:
+    _log(f"shell_mode=browser (explicit) → {target} keep_server={keep_server}")
     print("[xochipilli] shell_mode=browser", flush=True)
     webbrowser.open(target)
     _alert(
         "ブラウザで開きました（XOCHIPILLI_SHELL=browser）。\n"
-        "通常の Dock 起動はネイティブ窓のみです。",
+        + (
+            "サーバはこのプロセスが生きている間だけ動きます。"
+            if keep_server
+            else "既存サーバを再利用しています。"
+        ),
         critical=False,
     )
+    if keep_server:
+        _log("browser mode: holding process so spawned server stays up (Ctrl+C to stop)")
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            _log("browser mode interrupted")
+            return 0
     time.sleep(1.0)
     return 0
 
@@ -1326,8 +1409,9 @@ def main() -> int:
     shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview").strip().lower()
 
     if shell in ("browser", "chrome", "safari", "system"):
-        rc = _run_browser_only(target)
-        _stop_server(server)
+        rc = _run_browser_only(target, keep_server=server is not None)
+        if server is not None:
+            _stop_server(server)
         return rc
 
     rc = _run_pywebview(target)

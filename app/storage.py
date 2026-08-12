@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,9 +11,31 @@ from typing import Any
 
 from .paths import PROJECTS
 
+_PROJECT_LOCKS: dict[str, threading.Lock] = {}
+_PROJECT_LOCKS_GUARD = threading.Lock()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def safe_project_id(pid: str) -> str:
+    """Reject path traversal / separators; return basename-safe project id."""
+    raw = str(pid or "")
+    safe = Path(raw).name
+    if not safe or safe != raw or ".." in raw or "/" in raw or "\\" in raw:
+        raise ValueError("invalid project id")
+    return safe
+
+
+def project_lock(pid: str) -> threading.Lock:
+    safe = safe_project_id(pid)
+    with _PROJECT_LOCKS_GUARD:
+        lock = _PROJECT_LOCKS.get(safe)
+        if lock is None:
+            lock = threading.Lock()
+            _PROJECT_LOCKS[safe] = lock
+        return lock
 
 
 def list_projects() -> list[dict[str, Any]]:
@@ -36,10 +60,14 @@ def list_projects() -> list[dict[str, Any]]:
     return items
 
 
-
 def project_dir(pid: str) -> Path:
-    return PROJECTS / pid
-
+    safe = safe_project_id(pid)
+    d = (PROJECTS / safe).resolve()
+    try:
+        d.relative_to(PROJECTS.resolve())
+    except ValueError as e:
+        raise ValueError("project path escapes projects root") from e
+    return PROJECTS / safe
 
 def digest_path(pid: str) -> Path:
     return project_dir(pid) / "digest.json"
@@ -217,7 +245,10 @@ def save_project(data: dict[str, Any]) -> dict[str, Any]:
     d = project_dir(pid)
     d.mkdir(parents=True, exist_ok=True)
     path = d / "project.json"
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = d / f".project.{os.getpid()}.tmp"
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    tmp.write_text(payload, encoding="utf-8")
+    os.replace(tmp, path)
     return data
 
 
@@ -245,15 +276,7 @@ def new_project(title: str = "Untitled") -> dict[str, Any]:
 
 def delete_project(pid: str) -> None:
     """Remove entire project directory (project.json, audio, clips, refs)."""
-    safe = Path(str(pid)).name
-    if safe != pid:
-        raise ValueError("invalid project id")
-    d = project_dir(safe)
-    # must stay under PROJECTS
-    try:
-        d.resolve().relative_to(PROJECTS.resolve())
-    except ValueError as e:
-        raise ValueError("project path escapes projects root") from e
+    d = project_dir(pid)
     if d.exists() and d.is_dir():
         shutil.rmtree(d)
 
@@ -268,7 +291,7 @@ def _safe_unlink(path: Path) -> None:
 
 def clear_project_media(pid: str) -> None:
     """Wipe clips/ and refs/ under a project (used on re-import)."""
-    d = project_dir(Path(str(pid)).name)
+    d = project_dir(pid)
     for sub in ("clips", "refs"):
         p = d / sub
         if p.is_dir():
@@ -277,7 +300,7 @@ def clear_project_media(pid: str) -> None:
 
 
 def remove_program_file(pid: str) -> None:
-    clips = project_dir(Path(str(pid)).name) / "clips"
+    clips = project_dir(pid) / "clips"
     _safe_unlink(clips / "program.mp4")
 
 
@@ -288,7 +311,7 @@ def remove_segment_media(
 ) -> None:
     """Delete on-disk media owned by one segment if nothing remaining still points at it."""
     remaining = remaining_segments if remaining_segments is not None else []
-    d = project_dir(Path(str(pid)).name)
+    d = project_dir(pid)
     clips_dir = d / "clips"
     refs_dir = d / "refs"
     sid = str(seg.get("id") or "")

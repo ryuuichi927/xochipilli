@@ -9,17 +9,23 @@
 
 Layout:
 - `/Applications/Xochipilli.app` (official icon = concept 03)
-- Source tree: your clone of `music-film-workbench/`
+- Source tree: path in `Contents/Resources/ProjectRoot` (e.g. `~/Projects/xochipilli`)
 
-## How launch works (0.2.0 — no Chrome)
+## How launch works (0.2.x — no Chrome)
 macOS **rejects direct exec of scripts inside Documents from a .app**.
 
 Chain:
 
 1. Dock → `/Applications/Xochipilli.app`
-2. → **in-bundle Mach-O** `Contents/MacOS/Xochipilli` embeds CPython and runs `desktop_app.main()`
-3. → starts/reuses FastAPI (`app.server:app`) on `:8787` (Craft routes included)
-4. → **native pywebview window only** (WKWebView). **Does not open Google Chrome.**
+2. → **in-bundle Mach-O** `Contents/MacOS/Xochipilli` embeds CPython
+3. → reads `Contents/Resources/ProjectRoot`, runs `desktop_app.main()` there
+4. → starts/reuses FastAPI (`app.server:app`) on `:8787` (Craft routes included)
+5. → **native pywebview window only** (WKWebView). **Does not open Google Chrome.**
+
+Rebuild:
+```bash
+./native/build_launcher.sh
+```
 
 ### Shell load path (white-screen lessons)
 - Prefer `create_window(html=…)` once with **inlined CSS** (`style.css` + `craft_ui.css`, id `xochi-inline-css`) over bare `url=` (bare url often stays white with correct title on this Mac).

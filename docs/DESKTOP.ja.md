@@ -9,16 +9,23 @@
 
 配置:
 - `/Applications/Xochipilli.app`（公式アイコン＝案3）
-- 実体コード: `music-film-workbench/` のクローン先
+- 実体コード: `ProjectRoot` が指すクローン（例: `~/Projects/xochipilli`）
 
-## 起動の仕組み（2026-08-04 夜 — Chrome なし）
+## 起動の仕組み（0.2.x — Chrome なし / Mach-O）
 macOS は **.app から Documents 内を直接 exec すると拒否**する。
 
 鎖:
 1. Dock → `/Applications/Xochipilli.app`
-2. → **`exec`** `~/Library/Application Support/Xochipilli/run.sh`（プロセスは生き残る）
-3. → `desktop_app.py` が `:8787` を起動／再利用
-4. → **ネイティブ pywebview 窓だけ**（Chrome は開かない）
+2. → **バンドル内 Mach-O** `Contents/MacOS/Xochipilli`（埋め込み CPython）
+3. → `Contents/Resources/ProjectRoot` を読み、そこで `desktop_app.main()` を実行
+4. → FastAPI（`app.server:app`）を `:8787` で起動／再利用
+5. → **ネイティブ pywebview 窓だけ**（Chrome は開かない）
+
+再ビルド:
+```bash
+./native/build_launcher.sh
+```
+（repo の `.app` と、あれば `/Applications/Xochipilli.app` に Mach-O + ProjectRoot を同期）
 
 任意: `XOCHIPILLI_SHELL=browser` のときだけシステムブラウザ。  
 以前の Chrome `--app` プロファイルは起動時に停止する。
@@ -30,39 +37,29 @@ macOS は **.app から Documents 内を直接 exec すると拒否**する。
 | 手段 | パス |
 |------|------|
 | .app | `/Applications/Xochipilli.app` |
-| run.sh | `~/Library/Application Support/Xochipilli/run.sh` |
 | シェル | `./RUN_DESKTOP.sh`（ターミナルから） |
 | ブラウザのみ | `./RUN_ME.sh` → http://127.0.0.1:8787 |
 
 ## ログ（起動しないとき）
-- `~/Library/Logs/Xochipilli/launch.log`（.app 側）
-- `~/Library/Logs/Xochipilli/session.log`（Python / 窓）
+- `~/Library/Logs/Xochipilli/session.log`（ランチャ / Python / uvicorn）
 
 健全な session の目安:
 ```text
-exec run.sh (stay as app process)
+==== mach-o launcher … root=…/xochipilli ====
 … desktop_app start …
 reuse server …（または server ready）
-window created → http://127.0.0.1:8787
+using load_html shell …
 ```
 
 ## トラブル
-- **何も起きない:** 上記ログを確認。一度 `xattr -cr /Applications/Xochipilli.app` のあと再クリック
-- **Dock が跳ねてすぐ終わる:** ランチャがまだ nohup+exit になっていないか確認
+- **何も起きない:** `session.log` を確認。一度 `xattr -cr /Applications/Xochipilli.app` のあと再クリック
+- **Dock が跳ねてすぐ終わる:** `./native/build_launcher.sh` で Mach-O を再ビルド。`ProjectRoot` のパスが存在するか確認
 - **真っ白な窓（タイトルだけ）:**
   1. まずブラウザで http://127.0.0.1:8787/ が暗く見えるか確認（見える＝サーバ OK）
-  2. `session.log` に `cocoa contentView=NSView container` と `using url= navigation (single)` があるか
-  3. 無い／古いビルドなら repo の `desktop_app.py` を最新にして Dock 再起動
-  4. それでも白ならログ全文を残す（Chrome 自動起動は使わない）
-  詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) Incident E/G
-- **暗い UI は見えるがクリック不能 / リサイズ不能:**
-  1. `session.log` が **url 単発**か確認（`using load_html path` / `shown load_html` / `boot load_html` が並んでいたら古い thrash 経路）
-  2. **`cocoa early setContentView_(WKWebView)` が出ていたら古い E/F パッチ**（直接 WK を contentView にしてヒットテストが壊れる — Incident G）
-  3. 健全例: `using url= navigation (single)` → `cocoa contentView=NSView container + WKWebView subview` → `window styleMask=… resizable=True` → `event loaded` → `nav ok — no reload`
-  4. 最新 `desktop_app.py` + `static/style.css` に更新して Dock / `./RUN_DESKTOP.sh` 再起動
-  詳細: Incident F/G（同日 incidents 文書）
-- **Traceback / icon 引数:** `desktop_app.py` は icon 非対応版 pywebview 向けに修正済み
-- **ポート衝突:** `.env` の `PORT=` または既存 8787
+  2. `session.log` に `using load_html shell` があるか
+  3. Dock `.app` 経由か確認（素の python だと WK の localhost が弱い）
+  詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
+- **ポート衝突:** `.env` の `PORT=`。無関係プロセスは殺さない（自前 uvicorn のみ停止）
+- **ffmpeg が見つからない（Dock）:** Homebrew の `/opt/homebrew/bin` を PATH に足す処理済み。未インストールなら `brew install ffmpeg`
 - **pywebview 無し:** `.venv/bin/pip install pywebview`
-- **Ben's Tool の PYTHONPATH 混入:** run.sh で解除。desktop_app も `/.bentool/` を sys.path から落とす
 - **ブラウザで開きたいときだけ:** `XOCHIPILLI_SHELL=browser`（Dock 既定では開かない）

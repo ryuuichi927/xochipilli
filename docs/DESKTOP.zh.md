@@ -9,32 +9,40 @@
 
 布局：
 - `/Applications/Xochipilli.app`（官方图标＝方案 3）
-- 代码本体：`music-film-workbench/` 的克隆目录
+- 代码本体：`ProjectRoot` 指向的克隆（例如 `~/Projects/xochipilli`）
 
-## 启动机制（2026-08-04 修正）
-macOS **会拒绝 .app 直接 exec Documents 内的脚本**  
-（症状：点击无反应 / 日志出现 `Operation not permitted`）。
+## 启动机制（0.2.x — 无 Chrome / Mach-O）
+macOS **会拒绝 .app 直接 exec Documents 内的脚本**。
 
-因此链路为：
+链路：
 1. Dock → `/Applications/Xochipilli.app`
-2. → 经 **osascript** 启动 `~/Library/Application Support/Xochipilli/run.sh`
-3. → 用项目 `.venv` 的 Python 运行 `desktop_app.py`（pywebview 窗口）
+2. → **包内 Mach-O** `Contents/MacOS/Xochipilli`（嵌入 CPython）
+3. → 读取 `Contents/Resources/ProjectRoot`，在该目录运行 `desktop_app.main()`
+4. → 启动/复用 FastAPI（`app.server:app`）于 `:8787`
+5. → **仅原生 pywebview 窗口**（不会打开 Chrome）
+
+重建：
+```bash
+./native/build_launcher.sh
+```
+
+可选：`XOCHIPILLI_SHELL=browser` 时才打开系统浏览器。
 
 ## 其他启动方式
 
 | 方式 | 路径 |
 |------|------|
 | .app | `/Applications/Xochipilli.app` |
-| run.sh | `~/Library/Application Support/Xochipilli/run.sh` |
 | Shell | `./RUN_DESKTOP.sh`（终端） |
 | 仅浏览器 | `./RUN_ME.sh` → http://127.0.0.1:8787 |
 
-## 日志（打不开时）
-- `~/Library/Logs/Xochipilli/launch.log`（.app 侧）
-- `~/Library/Logs/Xochipilli/session.log`（Python / 窗口）
+## 日志
+- `~/Library/Logs/Xochipilli/session.log`
 
 ## 故障排除
-- **什么都没有：** 先看上面日志。可试 `xattr -cr /Applications/Xochipilli.app` 后再点
-- **Traceback / icon 参数：** `desktop_app.py` 已兼容不支持 `icon=` 的 pywebview
-- **端口冲突：** 在 `.env` 设 `PORT=`，或释放 8787
+- **什么都没有：** 看 session.log；可试 `xattr -cr /Applications/Xochipilli.app`
+- **Dock 立刻退出：** 运行 `./native/build_launcher.sh`，确认 ProjectRoot 路径存在
+- **端口冲突：** `.env` 设 `PORT=`（不会强杀无关进程）
+- **Dock 找不到 ffmpeg：** 已把 `/opt/homebrew/bin` 加入 PATH；需先 `brew install ffmpeg`
 - **没有 pywebview：** `.venv/bin/pip install pywebview`
+- **仅浏览器：** `XOCHIPILLI_SHELL=browser`

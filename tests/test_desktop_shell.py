@@ -151,9 +151,34 @@ def main() -> int:
     (ok if "NSAllowsLocalNetworking" in plist else bad)("plist allows local networking")
 
     csrc = ROOT / "native/xochipilli_launcher.c"
-    (ok if csrc.is_file() and "Py_Initialize" in csrc.read_text() else bad)(
-        "native launcher source"
+    ctxt = csrc.read_text(encoding="utf-8") if csrc.is_file() else ""
+    (ok if csrc.is_file() and "Py_Initialize" in ctxt else bad)("native launcher source")
+    (ok if "ProjectRoot" in ctxt and "read_project_root" in ctxt else bad)(
+        "launcher reads ProjectRoot"
     )
+    if "/Users/" in ctxt and "Documents" in ctxt:
+        bad("launcher still hardcodes Documents user path")
+    else:
+        ok("launcher has no hardcoded Documents path")
+
+    pr = ROOT / "Xochipilli.app/Contents/Resources/ProjectRoot"
+    if pr.is_file():
+        root_line = pr.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+        if root_line == str(ROOT):
+            ok("ProjectRoot matches clone")
+        else:
+            bad(f"ProjectRoot={root_line!r} != {ROOT}")
+    else:
+        bad("ProjectRoot file missing")
+
+    desk_more = (
+        "_kill_our_listeners_on_port",
+        "_ensure_media_path",
+        "XOCHIPILLI_API_TOKEN",
+        "__XOCHI_API_TOKEN__",
+    )
+    for n in desk_more:
+        (ok if n in desk else bad)(f"has {n}")
 
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/api/health", timeout=1.5) as r:

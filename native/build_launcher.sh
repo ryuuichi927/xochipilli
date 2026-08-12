@@ -6,17 +6,37 @@ INC="${PYTHON_INCLUDE:-$HOME/.local/share/uv/python/cpython-3.11.15-macos-aarch6
 LIB="${PYTHON_LIBDIR:-$HOME/.local/share/uv/python/cpython-3.11.15-macos-aarch64-none/lib}"
 OUT_REPO="$ROOT/Xochipilli.app/Contents/MacOS/Xochipilli"
 OUT_APP="/Applications/Xochipilli.app/Contents/MacOS/Xochipilli"
+RESOURCES_REPO="$ROOT/Xochipilli.app/Contents/Resources"
+PROJECT_ROOT_FILE="$RESOURCES_REPO/ProjectRoot"
+
+mkdir -p "$RESOURCES_REPO"
+# Always pin ProjectRoot to this clone (override stale absolute paths).
+printf '%s\n' "$ROOT" > "$PROJECT_ROOT_FILE"
+
+if [[ ! -d "$INC" || ! -d "$LIB" ]]; then
+  echo "Python headers/libs not found."
+  echo "Set PYTHON_INCLUDE / PYTHON_LIBDIR, or install cpython 3.11 via uv."
+  echo "INC=$INC"
+  echo "LIB=$LIB"
+  exit 1
+fi
+
 clang -O2 -arch arm64 \
   -I"$INC" -L"$LIB" -lpython3.11 \
   -Wl,-rpath,"$LIB" \
   -o "$OUT_REPO" \
   "$ROOT/native/xochipilli_launcher.c"
 chmod +x "$OUT_REPO"
+
 if [[ -d /Applications/Xochipilli.app ]]; then
+  mkdir -p /Applications/Xochipilli.app/Contents/Resources
   cp -f "$OUT_REPO" "$OUT_APP"
   cp -f "$ROOT/Xochipilli.app/Contents/Info.plist" /Applications/Xochipilli.app/Contents/Info.plist
+  cp -f "$PROJECT_ROOT_FILE" /Applications/Xochipilli.app/Contents/Resources/ProjectRoot
   chmod +x "$OUT_APP"
   xattr -cr /Applications/Xochipilli.app 2>/dev/null || true
 fi
+
 echo "built $OUT_REPO"
+echo "ProjectRoot=$(cat "$PROJECT_ROOT_FILE")"
 file "$OUT_REPO"

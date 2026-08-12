@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .video_gen import (
     clip_unit_seconds,
@@ -55,6 +56,31 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+
+class _ApiTokenMiddleware(BaseHTTPMiddleware):
+    """When XOCHIPILLI_API_TOKEN is set, require it on mutating /api routes."""
+
+    async def dispatch(self, request: Request, call_next):
+        token = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
+        path = request.url.path or ""
+        method = (request.method or "GET").upper()
+        if (
+            token
+            and path.startswith("/api/")
+            and path not in ("/api/health",)
+            and method not in ("GET", "HEAD", "OPTIONS")
+        ):
+            got = (request.headers.get("x-xochi-token") or "").strip()
+            if got != token:
+                return JSONResponse(
+                    {"detail": "invalid or missing X-Xochi-Token"},
+                    status_code=401,
+                )
+        return await call_next(request)
+
+
+app.add_middleware(_ApiTokenMiddleware)
 
 # Prevent double-submit races (same segment generate twice)
 _GEN_LOCKS: set[str] = set()
@@ -107,7 +133,11 @@ class UnmatchBody(BaseModel):
 
 def _proj(pid: str, *, with_series: bool = False) -> dict[str, Any]:
     try:
-        return storage.load_project(pid, with_series=with_series)
+        safe = storage.safe_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, "invalid project id") from e
+    try:
+        return storage.load_project(safe, with_series=with_series)
     except FileNotFoundError:
         raise HTTPException(404, "project not found")
 
@@ -149,6 +179,7 @@ def health():
         "stage": "D1",
         "product": "Xochipilli",
         "root": str(ROOT),
+        "api_token_required": bool((os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()),
         "video_provider": provider,
         fal_flag_key: fal_set if provider == "fal" else None,
         "fal_model": os.environ.get("FAL_VIDEO_MODEL") if provider == "fal" else None,
@@ -228,15 +259,22 @@ def api_patch_project(pid: str, body: WorldBody):
 
 @app.delete("/api/projects/{pid}")
 def api_delete_project(pid: str):
-    safe = Path(str(pid)).name
-    if safe != pid or ".." in pid or "/" in pid or "\\" in pid:
-        raise HTTPException(400, "invalid project id")
     try:
-        storage.load_project(pid)
-    except FileNotFoundError:
-        raise HTTPException(404, "project not found")
-    storage.delete_project(pid)
-    return {"ok": True, "deleted": pid}
+        safe = storage.safe_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, "invalid project id") from e
+    lock = storage.project_lock(safe)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(409, "project busy")
+    try:
+        try:
+            storage.load_project(safe)
+        except FileNotFoundError:
+            raise HTTPException(404, "project not found")
+        storage.delete_project(safe)
+        return {"ok": True, "deleted": safe}
+    finally:
+        lock.release()
 
 
 @app.post("/api/projects/{pid}/reveal")
@@ -244,14 +282,11 @@ def api_reveal_project(pid: str):
     import subprocess
     import sys
 
-    safe = Path(str(pid)).name
-    if safe != pid or ".." in pid or "/" in pid or "\\" in pid:
-        raise HTTPException(400, "invalid project path")
-    d = storage.project_dir(safe)
     try:
-        d.resolve().relative_to(storage.PROJECTS.resolve())
-    except ValueError:
-        raise HTTPException(400, "invalid project path")
+        safe = storage.safe_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, "invalid project path") from e
+    d = storage.project_dir(safe)
     if not d.is_dir():
         raise HTTPException(404, "project folder not found")
     try:
@@ -295,51 +330,61 @@ def api_restore_project(pid: str, body: ProjectRestoreBody):
 
 @app.post("/api/projects/{pid}/import")
 async def api_import(pid: str, file: UploadFile = File(...)):
-    p = _proj(pid)
-    pdir = storage.project_dir(pid)
-    pdir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
-    if suffix.lower() == ".aiff":
-        suffix = ".aiff"
-    raw_path = pdir / f"source{suffix}"
-    with raw_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    try:
+        safe = storage.safe_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, "invalid project id") from e
+    lock = storage.project_lock(safe)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(409, "project busy")
+    try:
+        p = _proj(safe)
+        pdir = storage.project_dir(safe)
+        pdir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+        if suffix.lower() == ".aiff":
+            suffix = ".aiff"
+        raw_path = pdir / f"source{suffix}"
+        with raw_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
 
-    for old in pdir.glob("source*"):
-        if old.is_file() and old.resolve() != raw_path.resolve():
-            try:
-                old.unlink()
-            except OSError:
-                pass
+        for old in pdir.glob("source*"):
+            if old.is_file() and old.resolve() != raw_path.resolve():
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
 
-    storage.clear_project_media(pid)
-    p["program"] = None
+        storage.clear_project_media(safe)
+        p["program"] = None
 
-    digest = digest_audio(raw_path, pdir)
-    stem = Path(file.filename or "track").stem.strip() or "track"
-    if not p.get("title") or str(p.get("title")).strip() in {"", "Untitled"}:
-        p["title"] = stem
-    p["source_audio"] = raw_path.name
-    storage.write_digest_file(pid, digest)
-    p["digest"] = {
-        "theory_id": digest["theory_id"],
-        "global": digest["global"],
-        "waveform_peaks": digest["waveform_peaks"],
-        "analysis_wav": digest["analysis_wav"],
-        "series_file": "digest.json",
-        "beats": {
-            "n": len((digest.get("beats") or {}).get("times") or []),
-            "downbeats_n": len((digest.get("beats") or {}).get("downbeat_times") or []),
-        },
-        "structure_candidates": digest.get("structure_candidates") or [],
-        "lyrics": digest.get("lyrics") or [],
-        "stems": digest.get("stems") or {},
-        "phase": digest.get("phase") or {},
-    }
-    p["segments"] = []
-    p["open_pin"] = None
-    storage.save_project(p)
-    return storage.public_project(p)
+        digest = digest_audio(raw_path, pdir)
+        stem = Path(file.filename or "track").stem.strip() or "track"
+        if not p.get("title") or str(p.get("title")).strip() in {"", "Untitled"}:
+            p["title"] = stem
+        p["source_audio"] = Path(raw_path.name).name
+        storage.write_digest_file(safe, digest)
+        p["digest"] = {
+            "theory_id": digest["theory_id"],
+            "global": digest["global"],
+            "waveform_peaks": digest["waveform_peaks"],
+            "analysis_wav": digest["analysis_wav"],
+            "series_file": "digest.json",
+            "beats": {
+                "n": len((digest.get("beats") or {}).get("times") or []),
+                "downbeats_n": len((digest.get("beats") or {}).get("downbeat_times") or []),
+            },
+            "structure_candidates": digest.get("structure_candidates") or [],
+            "lyrics": digest.get("lyrics") or [],
+            "stems": digest.get("stems") or {},
+            "phase": digest.get("phase") or {},
+        }
+        p["segments"] = []
+        p["open_pin"] = None
+        storage.save_project(p)
+        return storage.public_project(p)
+    finally:
+        lock.release()
 
 
 @app.get("/api/projects/{pid}/audio")
@@ -348,7 +393,9 @@ def api_audio(pid: str):
     name = p.get("source_audio")
     if not name:
         raise HTTPException(404, "no audio")
-    path = storage.project_dir(pid) / name
+    # Basename only — never honor path components from project.json
+    safe_name = Path(str(name)).name
+    path = storage.project_dir(pid) / safe_name
     if not path.exists():
         aw = storage.project_dir(pid) / "analysis.wav"
         if aw.exists():
@@ -720,14 +767,22 @@ def api_unmatch(pid: str, sid: str, body: UnmatchBody):
 
 @app.post("/api/projects/{pid}/segments/{sid}/generate")
 async def api_generate(pid: str, sid: str):
-    lock_key = f"{pid}:{sid}"
+    try:
+        safe = storage.safe_project_id(pid)
+    except ValueError as e:
+        raise HTTPException(400, "invalid project id") from e
+    lock_key = f"{safe}:{sid}"
     if lock_key in _GEN_LOCKS:
         raise HTTPException(409, "この区間はすでに生成中です（二重送信をブロック）")
+    plock = storage.project_lock(safe)
+    if not plock.acquire(blocking=False):
+        raise HTTPException(409, "project busy")
     _GEN_LOCKS.add(lock_key)
     try:
-        return await _api_generate_inner(pid, sid)
+        return await _api_generate_inner(safe, sid)
     finally:
         _GEN_LOCKS.discard(lock_key)
+        plock.release()
 
 
 async def _api_generate_inner(pid: str, sid: str):
@@ -1028,7 +1083,9 @@ async def _api_generate_inner(pid: str, sid: str):
     else:
         raise HTTPException(500, "生成結果が空です")
 
-    # Optional: mux segment audio onto final (best-effort)
+    # Optional: mux segment audio onto final (best-effort, but surface failure)
+    mux_ok = True
+    mux_note = ""
     if audio_seg and Path(audio_seg).exists() and out.is_file():
         tmp_mux = out.with_suffix(".mux.mp4")
         import subprocess
@@ -1053,6 +1110,14 @@ async def _api_generate_inner(pid: str, sid: str):
         )
         if r.returncode == 0 and tmp_mux.is_file():
             tmp_mux.replace(out)
+        else:
+            mux_ok = False
+            mux_note = f"audio mux failed (rc={r.returncode})"
+            try:
+                if tmp_mux.is_file():
+                    tmp_mux.unlink()
+            except OSError:
+                pass
 
     primary_mode = (
         "extension"
@@ -1070,6 +1135,9 @@ async def _api_generate_inner(pid: str, sid: str):
         note_bits.append(str(last_meta.get("note")))
     if partial_error:
         note_bits.append(f"partial take — later parts failed: {partial_error}")
+    if mux_note:
+        note_bits.append(mux_note)
+    is_partial = bool(partial_error) or (not mux_ok)
     entry = {
         "id": clip_id,
         "file": out.name,
@@ -1077,7 +1145,7 @@ async def _api_generate_inner(pid: str, sid: str):
         "composed_prompt": composed_first,
         "note": " · ".join(note_bits) if note_bits else last_meta.get("note"),
         "created_at": storage._now(),
-        "label": f"take {take_n}" + (" (partial)" if partial_error else ""),
+        "label": f"take {take_n}" + (" (partial)" if is_partial else ""),
         "auth_source": last_meta.get("auth_source"),
         "model": last_meta.get("model"),
         "resolution": last_meta.get("resolution"),
@@ -1103,7 +1171,8 @@ async def _api_generate_inner(pid: str, sid: str):
         "is_mock": bool(last_meta.get("is_mock")),
         "chain_mode": primary_mode,
         "xfade_seconds": xfade_seconds() if primary_mode in {"i2v", "hybrid", "i2v-fallback"} else 0,
-        "partial": bool(partial_error),
+        "partial": is_partial,
+        "mux_ok": mux_ok,
         "duration_api": last_meta.get("duration_api") or last_meta.get("duration"),
         "duration_actual": last_meta.get("duration_actual"),
     }
@@ -1111,7 +1180,7 @@ async def _api_generate_inner(pid: str, sid: str):
     seg["active_clip_id"] = clip_id
     seg["video"] = dict(entry)
     storage.save_project(p)
-    return {"segment": seg, "meta": last_meta, "clip": entry, "partial": bool(partial_error)}
+    return {"segment": seg, "meta": last_meta, "clip": entry, "partial": is_partial}
 
 
 class ClipSelectBody(BaseModel):

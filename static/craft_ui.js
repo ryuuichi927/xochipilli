@@ -159,7 +159,19 @@
       typeof window.apiUrl === "function"
         ? window.apiUrl(path)
         : path;
-    const res = await fetch(url, opts);
+    const next = Object.assign({}, opts || {});
+    const headers = new Headers((opts && opts.headers) || {});
+    const method = String((opts && opts.method) || "GET").toUpperCase();
+    let tok = "";
+    try {
+      if (typeof window.apiToken === "function") tok = window.apiToken() || "";
+      else if (window.__XOCHI_API_TOKEN__) tok = String(window.__XOCHI_API_TOKEN__);
+    } catch (_) {}
+    if (tok && method !== "GET" && method !== "HEAD" && !headers.has("X-Xochi-Token")) {
+      headers.set("X-Xochi-Token", tok);
+    }
+    next.headers = headers;
+    const res = await fetch(url, next);
     if (!res.ok) {
       let detail = res.statusText;
       try {
