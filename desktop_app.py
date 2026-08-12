@@ -75,6 +75,7 @@ VENV_PY = ROOT / ".venv" / "bin" / "python"
 SUPPORT = Path.home() / "Library/Application Support/Xochipilli"
 CHROME_PROFILE = SUPPORT / "chrome-app-profile"
 SESSION_LOG = Path.home() / "Library/Logs/Xochipilli/session.log"
+TOKEN_FILE = SUPPORT / "api_token"
 _DID_ACTIVATE_COCOA = False
 
 
@@ -289,20 +290,60 @@ def _ensure_media_path(env: dict[str, str]) -> None:
     env["PATH"] = ":".join(parts)
 
 
-def _ensure_api_token() -> str:
-    tok = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
-    if not tok:
-        tok = os.urandom(16).hex()
-        os.environ["XOCHIPILLI_API_TOKEN"] = tok
-        _log("generated XOCHIPILLI_API_TOKEN for this session")
+def _token_fingerprint(tok: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(tok.encode("utf-8")).hexdigest()[:12]
+
+
+def _write_api_token(tok: str) -> None:
+    try:
+        SUPPORT.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+        try:
+            os.chmod(TOKEN_FILE, 0o600)
+        except OSError:
+            pass
+    except OSError as e:
+        _log(f"api_token write failed: {e}")
+
+
+def _ensure_api_token(*, rotate: bool = False) -> str:
+    """Stable local API token shared by Dock shell + uvicorn (file-backed)."""
+    if not rotate:
+        env_tok = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
+        if env_tok:
+            _write_api_token(env_tok)
+            return env_tok
+        try:
+            if TOKEN_FILE.is_file():
+                file_tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+                if file_tok:
+                    os.environ["XOCHIPILLI_API_TOKEN"] = file_tok
+                    return file_tok
+        except OSError as e:
+            _log(f"api_token read failed: {e}")
+    tok = os.urandom(16).hex()
+    os.environ["XOCHIPILLI_API_TOKEN"] = tok
+    _write_api_token(tok)
+    _log("generated XOCHIPILLI_API_TOKEN for this session")
     return tok
 
 
 def _token_compatible(h: dict | None) -> bool:
-    """Reuse only if live server token posture matches ours."""
-    want = bool((os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip())
+    """Reuse only if live server expects the same API token we hold."""
+    tok = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
+    want = bool(tok)
     have = bool((h or {}).get("api_token_required"))
-    return want == have
+    if want != have:
+        return False
+    if not want:
+        return True
+    fp = str((h or {}).get("api_token_fp") or "")
+    if not fp:
+        # Old server without fingerprint — do not reuse (restart with known token).
+        return False
+    return fp == _token_fingerprint(tok)
 
 
 def _preflight_http() -> tuple[bool, str]:
@@ -1464,6 +1505,8 @@ def main() -> int:
             "session.log を確認するか ./RUN_ME.sh を試してください。",
             critical=True,
         )
+        _stop_server(server)
+        return 1
 
     target = f"{URL}/"
     shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview").strip().lower()

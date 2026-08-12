@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 import shutil
@@ -173,13 +174,15 @@ def health():
         or os.environ.get("XAI_VIDEO_MODEL_I2V")
         or "grok-imagine-video-1.5"
     )
+    token = (os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()
     unit = clip_unit_seconds()
     out: dict[str, Any] = {
         "ok": True,
         "stage": "D1",
         "product": "Xochipilli",
         "root": str(ROOT),
-        "api_token_required": bool((os.environ.get("XOCHIPILLI_API_TOKEN") or "").strip()),
+        "api_token_required": bool(token),
+        "api_token_fp": hashlib.sha256(token.encode("utf-8")).hexdigest()[:12] if token else None,
         "video_provider": provider,
         fal_flag_key: fal_set if provider == "fal" else None,
         "fal_model": os.environ.get("FAL_VIDEO_MODEL") if provider == "fal" else None,
