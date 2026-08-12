@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語** | [中文](README.zh.md)
 
-ローカル PC で動く **玄人向け** 音楽→映像作業台。  
+ローカル PC で動く 音楽→映像作業台。  
 名前はアステカ神話の **Xochipilli（花の王子）** 
 
 設計: **龍一 · Ryuichi Hamakawa**
