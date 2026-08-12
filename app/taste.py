@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .paths import ROOT
+from .paths import DATA
 
-USER_DIR = ROOT / "data" / "user"
+USER_DIR = DATA / "user"
 TASTE_PATH = USER_DIR / "taste.json"
 
 # episode = functional mismatch (Episode Model as *interpretation*, not a 20s segment stamp)

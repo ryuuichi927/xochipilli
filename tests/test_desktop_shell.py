@@ -198,10 +198,66 @@ def main() -> int:
     (ok if 'NEW_PROJECT_OPTION = "__new__"' in app_js else bad)("app.js has create-new option")
     (ok if 'projectCreateNew' in app_js else bad)("project dropdown offers create-new")
     (ok if "statusTokenStale" in app_js else bad)("app.js explains a stale token")
+    (ok if "unarchiveAndWait" in app_js else bad)("app.js pulls a cold project back")
+    (ok if 'startsWith("☁")' in app_js or "☁ ${title}" in app_js else bad)(
+        "app.js marks archived projects"
+    )
     i18n_js = (ROOT / "static/i18n.js").read_text(encoding="utf-8")
-    for key in ("projectCreateNew", "statusTokenStale"):
+    for key in ("projectCreateNew", "statusTokenStale", "statusUnarchiving", "projectArchivedHint"):
         n_lang = i18n_js.count(f"{key}:")
         (ok if n_lang >= 3 else bad)(f"i18n {key} in {n_lang}/3 languages")
+
+    # Works must not live in the repo: a re-clone or a code update would put them in the
+    # blast radius, and the venv/data would travel with git.
+    paths_py = (ROOT / "app/paths.py").read_text(encoding="utf-8")
+    if "\nDATA = ROOT /" in paths_py:
+        bad("data home is still inside the repo")
+    else:
+        ok("data home lives outside the repo")
+    for n in ("XOCHIPILLI_DATA", "XOCHIPILLI_ARCHIVE", "LEGACY_DATA"):
+        (ok if n in paths_py else bad)(f"paths.py has {n}")
+    taste_py = (ROOT / "app/taste.py").read_text(encoding="utf-8")
+    if 'ROOT / "data"' in taste_py:
+        bad("taste.py still writes into the repo")
+    else:
+        ok("taste.py follows the data home")
+
+    arch_py = (ROOT / "app/archive.py").read_text(encoding="utf-8")
+    for n in (
+        "_copy_tree_verified",
+        "size mismatch",
+        "brctl",
+        "evict_archived",
+        "_CrossProcessLock",
+        "cold_projects",
+        "restore_project",
+    ):
+        (ok if n in arch_py else bad)(f"archive.py has {n}")
+    # Deleting before the copy is verified would lose the work outright.
+    i_verify = arch_py.find("_copy_tree_verified(src, dst)")
+    i_delete = arch_py.find("shutil.rmtree(entry)")
+    if i_verify < 0 or i_delete < 0:
+        bad("cannot locate archive copy/delete order")
+    elif i_verify < i_delete:
+        ok("archive verifies the copy before deleting the local one")
+    else:
+        bad("archive deletes local files before verifying the cloud copy")
+
+    for n in ("touch_opened", "def last_seen"):
+        (ok if n in (ROOT / "app/storage.py").read_text(encoding="utf-8") else bad)(
+            f"storage.py has {n}"
+        )
+    server_py = (ROOT / "app/server.py").read_text(encoding="utf-8")
+    (ok if "archive" in server_py and "Timer" in server_py else bad)(
+        "server schedules the archive sweep"
+    )
+    (ok if "XOCHIPILLI_NO_ARCHIVE" in server_py else bad)("archive sweep can be switched off")
+    agent = ROOT / "tools/archive_cold.py"
+    (ok if agent.is_file() else bad)("archive CLI / launchd agent installer exists")
+    if agent.is_file():
+        agent_txt = agent.read_text(encoding="utf-8")
+        for n in ("StartCalendarInterval", "launchctl", "--restore", "--dry-run"):
+            (ok if n in agent_txt else bad)(f"archive CLI has {n}")
 
     digest_py = (ROOT / "app/digest.py").read_text(encoding="utf-8")
     (ok if "max_frames" in digest_py else bad)("structure analysis caps its affinity matrix")

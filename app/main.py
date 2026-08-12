@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import shutil
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -33,6 +34,7 @@ from .digest import digest_audio, segment_features, candidates_to_segments_paylo
 from .emotion import emotion_keywords
 from .mapping import build_constraints, compose_video_prompt
 from .paths import ROOT, STATIC
+from . import archive
 from . import storage
 from . import craft
 from . import taste as taste_mod
@@ -139,6 +141,13 @@ def _proj(pid: str, *, with_series: bool = False) -> dict[str, Any]:
         safe = storage.safe_project_id(pid)
     except ValueError as e:
         raise HTTPException(400, "invalid project id") from e
+    if archive.is_archived(safe):
+        # Only a stub is on disk — editing it would write over the cloud copy's metadata.
+        raise HTTPException(
+            409,
+            "この作品は iCloud に退避してある。取り戻してから開く。",
+            headers={"X-Xochi-Archived": "1"},
+        )
     try:
         return storage.load_project(safe, with_series=with_series)
     except FileNotFoundError:
@@ -232,7 +241,41 @@ def api_create_project(title: str = Form("Untitled")):
 
 @app.get("/api/projects/{pid}")
 def api_get_project(pid: str):
-    return storage.public_project(_proj(pid))
+    p = _proj(pid)
+    storage.touch_opened(pid)
+    return storage.public_project(p)
+
+
+@app.get("/api/archive")
+def api_archive_status():
+    return archive.status()
+
+
+@app.post("/api/archive/run")
+def api_archive_run():
+    archive.run_in_background()
+    return {"started": True, **archive.status()}
+
+
+@app.post("/api/projects/{pid}/unarchive")
+def api_unarchive_project(pid: str):
+    """Start pulling a project back from iCloud; the UI polls until archived flips off."""
+    safe = storage.safe_project_id(pid)
+    if not archive.is_archived(safe):
+        return {"id": safe, "archived": False, "restored": True}
+    threading.Thread(
+        target=lambda: _restore_quietly(safe),
+        name=f"xochipilli-restore-{safe}",
+        daemon=True,
+    ).start()
+    return {"id": safe, "started": True}
+
+
+def _restore_quietly(pid: str) -> None:
+    try:
+        archive.restore_project(pid)
+    except (OSError, ValueError) as e:  # surfaced to the UI as a still-archived project
+        print(f"[xochipilli] restore {pid} failed: {e}", flush=True)
 
 
 @app.patch("/api/projects/{pid}")
@@ -430,9 +473,15 @@ def api_audio(pid: str):
         raise HTTPException(404, "no audio")
     # Basename only — never honor path components from project.json
     safe_name = Path(str(name)).name
-    path = storage.project_dir(pid) / safe_name
+    pdir = storage.project_dir(pid)
+    path = pdir / safe_name
     if not path.exists():
-        aw = storage.project_dir(pid) / "analysis.wav"
+        # An older import can leave source_audio pointing at an extension that is no longer
+        # on disk; the real file is still there, so play it instead of the 22 kHz mono proxy.
+        actual = sorted(f for f in pdir.glob("source.*") if f.is_file())
+        if actual:
+            return FileResponse(actual[0])
+        aw = pdir / "analysis.wav"
         if aw.exists():
             return FileResponse(aw, media_type="audio/wav")
         raise HTTPException(404, "audio missing")

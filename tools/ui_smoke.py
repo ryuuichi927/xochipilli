@@ -86,15 +86,94 @@ class Page:
 
 STATUS_JS = "document.getElementById('status').textContent"
 
+OPTIONS_JS = (
+    "JSON.stringify([...document.getElementById('projectSelect').options]"
+    ".map(o=>[o.value,o.textContent]))"
+)
 
-async def run(url: str, import_file: str | None = None) -> int:
+
+async def _wait_context(p: "Page", timeout: float = 40.0) -> None:
+    """Chrome accepts CDP before the tab has a JS context; evaluating too early throws."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if await p.eval("document.readyState"):
+                return
+        except RuntimeError:
+            pass
+        await asyncio.sleep(0.5)
+    raise RuntimeError("page never got a JS execution context")
+
+
+async def restore_flow(p: "Page") -> list[str]:
+    """Pick a ☁ (archived) project and watch it come back from iCloud."""
+    fails: list[str] = []
+    opts = json.loads(await p.eval(OPTIONS_JS) or "[]")
+    cold = [o for o in opts if (o[1] or "").startswith("☁")]
+    if not cold:
+        print("no archived project in the dropdown — nothing to restore")
+        return fails
+    pid, label = cold[0]
+    print(f"selecting {label} ({pid})")
+    await p.eval(
+        "(()=>{const s=document.getElementById('projectSelect');s.value=%s;"
+        "s.dispatchEvent(new Event('change'));})()" % json.dumps(pid)
+    )
+    seen: list[str] = []
+    loaded = False
+    for _ in range(300):  # an evicted folder has to download; give it 10 minutes
+        await asyncio.sleep(2.0)
+        status = await p.eval(STATUS_JS)
+        if status and (not seen or seen[-1] != status):
+            seen.append(status)
+            print(f"  status: {status}")
+        got = await p.eval(
+            "JSON.stringify({id:(typeof state!=='undefined'&&state.project)?state.project.id:null,"
+            "bpm:(typeof state!=='undefined'&&state.project&&state.project.digest)?"
+            "state.project.digest.global.tempo_bpm:null,"
+            "label:(([...document.getElementById('projectSelect').options]"
+            ".find(o=>o.value===%s)||{}).textContent)||''})" % json.dumps(pid)
+        )
+        got = json.loads(got or "{}")
+        if got.get("id") == pid and got.get("bpm"):
+            print(f"restored: {got}")
+            loaded = True
+            if (got.get("label") or "").startswith("☁"):
+                fails.append("project loaded but the dropdown still shows it as archived")
+            break
+    if not loaded:
+        fails.append(f"archived project never came back (last status: {seen[-1:] })")
+    return fails
+
+
+async def run(url: str, import_file: str | None = None, only_restore: bool = False) -> int:
     import websockets
 
-    pages = [t for t in _wait_targets() if url.rstrip("/") in (t.get("url") or "").rstrip("/")]
-    page = (pages or _wait_targets())[0]
+    page = None
+    deadline = time.time() + 20
+    while time.time() < deadline and page is None:
+        for t in _wait_targets():
+            if url.rstrip("/") in (t.get("url") or "").rstrip("/"):
+                page = t
+                break
+        if page is None:
+            time.sleep(0.5)
+    page = page or _wait_targets()[0]
     fails: list[str] = []
     async with websockets.connect(page["webSocketDebuggerUrl"], max_size=16 * 1024 * 1024) as ws:
         p = Page(ws)
+        await _wait_context(p)
+        # A tab that opened before the server answered shows Chrome's error page; the app
+        # never boots there and every selector comes back null.
+        here = await p.eval("location.href")
+        if url.rstrip("/") not in (here or "").rstrip("/"):
+            await p.send("Page.navigate", {"url": url})
+            await asyncio.sleep(1.5)
+            await _wait_context(p)
+        for _ in range(80):
+            if await p.eval("!!document.getElementById('projectSelect')"):
+                break
+            await asyncio.sleep(0.5)
         # Boot must populate the project dropdown.
         for _ in range(60):
             n = await p.eval(
@@ -116,6 +195,16 @@ async def run(url: str, import_file: str | None = None) -> int:
 
         err = await p.eval("JSON.stringify(window.__uiErrors||[])")
         console = json.loads(err or "[]")
+
+        if only_restore:
+            fails += await restore_flow(p)
+            print("----")
+            if fails:
+                for f in fails:
+                    print(f"FAIL {f}")
+                return 1
+            print("RESTORE_SMOKE_PASS fails=0")
+            return 0
 
         # "create new project" via the dropdown, exactly like a user does it. Everything
         # after this runs inside that throwaway project so no real project is touched.
@@ -250,6 +339,11 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8788)
     ap.add_argument("--keep", action="store_true", help="leave Chrome open")
     ap.add_argument("--import-file", default=None, help="audio file to import via the UI")
+    ap.add_argument(
+        "--only-restore",
+        action="store_true",
+        help="only open a ☁ archived project and verify it comes back from iCloud",
+    )
     args = ap.parse_args()
     if not Path(CHROME).exists():
         print("Google Chrome not installed — skipping UI smoke")
@@ -269,7 +363,9 @@ def main() -> int:
         stderr=subprocess.DEVNULL,
     )
     try:
-        return asyncio.run(run(f"http://127.0.0.1:{args.port}/", args.import_file))
+        return asyncio.run(
+            run(f"http://127.0.0.1:{args.port}/", args.import_file, args.only_restore)
+        )
     finally:
         if not args.keep:
             proc.terminate()

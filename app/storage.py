@@ -49,6 +49,8 @@ def list_projects() -> list[dict[str, Any]]:
                     "title": data.get("title"),
                     "updated_at": data.get("updated_at"),
                     "created_at": data.get("created_at"),
+                    "opened_at": data.get("opened_at"),
+                    "archived": bool(data.get("archived")),
                     "duration_sec": (data.get("digest") or {}).get("global", {}).get("duration_sec"),
                     "segment_count": len(data.get("segments") or []),
                     "dir": p.parent.name,
@@ -58,6 +60,34 @@ def list_projects() -> list[dict[str, Any]]:
             continue
     items.sort(key=lambda x: x.get("updated_at") or x.get("id") or "", reverse=True)
     return items
+
+
+def touch_opened(pid: str) -> None:
+    """Record that the project was opened, without bumping updated_at.
+
+    The archiver needs "when did Ryuichi last look at this", which is not the same as
+    "when was it last written" — reading a project must not make it look freshly edited.
+    """
+    path = project_dir(pid) / "project.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if data.get("archived"):
+        return
+    data["opened_at"] = _now()
+    tmp = path.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+
+
+def last_seen(data: dict[str, Any]) -> str:
+    """Most recent human contact with a project: opened or edited, whichever is later."""
+    stamps = [str(data.get(k) or "") for k in ("opened_at", "updated_at", "created_at")]
+    return max(stamps)
 
 
 def project_dir(pid: str) -> Path:

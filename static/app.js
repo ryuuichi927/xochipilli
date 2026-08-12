@@ -679,7 +679,10 @@ async function api(path, opts = {}) {
         detail = await res.text();
       } catch (__) {}
     }
-    throw new Error(detail || `HTTP ${res.status}`);
+    const err = new Error(detail || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.archived = res.headers.get("X-Xochi-Archived") === "1";
+    throw err;
   }
   if (res.status === 204) return null;
   const ct = res.headers.get("content-type") || "";
@@ -712,8 +715,8 @@ async function refreshProjectList(selectId) {
     const o = document.createElement("option");
     o.value = p.id;
     const title = (p.title || "").trim() || p.id;
-    o.textContent = title;
-    o.title = `${title} (${p.id})`;
+    o.textContent = p.archived ? `☁ ${title}` : title;
+    o.title = p.archived ? `${title} (${p.id}) — ${t("projectArchivedHint")}` : `${title} (${p.id})`;
     sel.appendChild(o);
   }
   if (prefer && projects.some((p) => p.id === prefer)) {
@@ -740,8 +743,34 @@ async function createProject() {
   return p;
 }
 
+/** Pull a cold project back from iCloud. An evicted folder has to download first, so this
+ * can legitimately take minutes — keep the user informed instead of looking stuck. */
+async function unarchiveAndWait(id) {
+  setStatus(t("statusUnarchiving"));
+  await api(`/api/projects/${encodeURIComponent(id)}/unarchive`, { method: "POST" });
+  for (let i = 0; i < 600; i++) {
+    await sleepMs(2000);
+    try {
+      const p = await api(`/api/projects/${id}`);
+      setStatus(t("statusUnarchived"));
+      await refreshProjectList(id);
+      return p;
+    } catch (e) {
+      if (!e || !e.archived) throw e;
+      if (i % 15 === 14) setStatus(t("statusUnarchivingLong"));
+    }
+  }
+  throw new Error(t("statusUnarchiveFail"));
+}
+
 async function loadProject(id) {
-  const p = await api(`/api/projects/${id}`);
+  let p;
+  try {
+    p = await api(`/api/projects/${id}`);
+  } catch (e) {
+    if (!e || !e.archived) throw e;
+    p = await unarchiveAndWait(id);
+  }
   state.project = p;
   try {
     localStorage.setItem("mfw.projectId", id);

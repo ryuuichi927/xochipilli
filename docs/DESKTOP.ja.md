@@ -8,8 +8,60 @@
 2. 専用窓が開く（中身はローカル `http://127.0.0.1:8787`）
 
 配置:
-- `/Applications/Xochipilli.app`（公式アイコン＝案3）
+- `/Applications/Xochipilli.app`（公式アイコン＝案3）— 本体の場所を読むだけの薄いランチャ
 - 実体コード: `ProjectRoot` が指すクローン（例: `~/Projects/xochipilli`）
+
+## どこに何が置いてあるか
+
+| もの | 場所 | 同期 |
+|------|------|------|
+| ソフト本体（コード + `.venv`） | `~/Projects/xochipilli` | git のみ |
+| Dock のランチャ | `/Applications/Xochipilli.app` | なし |
+| 制作した作品 | `~/Documents/Xochipilli/projects/<id>/` | ローカルのみ |
+| 味の学習 / Canva トークン | `~/Documents/Xochipilli/` | ローカルのみ |
+| 1週間開いてない作品 | `iCloud Drive/Xochipilli/Archive/<id>/` | iCloud（実体はオフロード） |
+| トークン / ログ | `~/Library/Application Support/Xochipilli/`, `~/Library/Logs/Xochipilli/` | なし |
+
+`.venv` は**このクローンの中に実体で**置く（他所へのシンボリックリンクにしない）。
+リンクにすると、リンク先を消した瞬間にアプリが起動しなくなる。
+
+作品はリポジトリの外に出してある。コードを更新したり別の場所に置き直したりしても、
+作ったものに手が届かないようにするため。置き場所は環境変数で変えられる:
+
+```bash
+XOCHIPILLI_DATA=~/Documents/Xochipilli        # 作品
+XOCHIPILLI_ARCHIVE=~/Library/Mobile\ Documents/com~apple~CloudDocs/Xochipilli/Archive
+XOCHIPILLI_COLD_DAYS=7                        # 何日開かなければ退避するか
+```
+
+昔のクローン内 `data/` から引っ越すには:
+```bash
+.venv/bin/python tools/migrate_data.py --dry-run   # 何が動くか見る
+.venv/bin/python tools/migrate_data.py
+```
+
+## iCloud への自動退避（7日ルール）
+開いてから7日たった作品は iCloud Drive に移り、ローカルの実体は解放される。
+一覧には `☁` 付きで残り、選べばその場で取り戻す（大きい曲だと数分かかる）。
+
+- 判定は「最後に開いた日」。見るだけでも日付は更新される（編集扱いにはしない）
+- 移動は **コピー → 全ファイルの大きさ照合 → ローカル削除 → `brctl evict`** の順。
+  照合が通るまで元は消さない
+- 導入や生成の最中の作品、いま開いている作品には触らない
+- iCloud はアップロード完了前の実体を解放できないので、毎回の掃除でもう一度 evict を試す
+
+実行のタイミング:
+- アプリ起動から90秒後に一度（最初に開いた作品が「冷たい」と誤判定されないため）
+- 毎日 04:30 に launchd で（`local.xochipilli.archive`、ログは `~/Library/Logs/Xochipilli/archive.log`）
+
+手で操る:
+```bash
+.venv/bin/python tools/archive_cold.py --status          # どれが☁でどれがローカルか
+.venv/bin/python tools/archive_cold.py --dry-run         # 何が退避されるか
+.venv/bin/python tools/archive_cold.py                   # いま退避する
+.venv/bin/python tools/archive_cold.py --restore <id>    # 取り戻す
+.venv/bin/python tools/archive_cold.py --install-agent   # 日次の仕掛けを入れ直す
+```
 
 ## 起動の仕組み（0.2.x — Chrome なし / Mach-O）
 macOS は **.app から Documents 内を直接 exec すると拒否**する。
@@ -71,6 +123,11 @@ using load_html shell …
   起動時にも検査して同じ内容を知らせる
 - **導入が何分も終わらない:** iCloud Drive 上の曲は macOS が実体をダウンロードするまで進まない。
   Finder でその曲を開いて実体化させるか、ローカルにコピーしてから導入する
+- **一覧に `☁` が付いていて開くのが遅い:** iCloud に退避してある。選べば自動で戻る。
+  戻したくないなら `XOCHIPILLI_COLD_DAYS` を大きくするか、
+  `launchctl bootout gui/$(id -u)/local.xochipilli.archive` で日次を止める
+- **`iCloud から取り戻せなかった`:** iCloud Drive がオフか、退避先の実体が消えている。
+  `ls "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Xochipilli/Archive"` で中身を確認
 
 ## ボタンの自動確認
 UI の全ボタン（フォルダへ飛ぶ / 新規作成 / 改名 / 削除 / 書き出し）と曲の導入を
@@ -80,3 +137,8 @@ UI の全ボタン（フォルダへ飛ぶ / 新規作成 / 改名 / 削除 / �
 .venv/bin/python tools/ui_smoke.py --port 8788 --import-file ~/path/to/track.mp3
 ```
 使い捨てプロジェクトを作ってその中だけで試し、最後に消すので既存プロジェクトは触らない。
+
+☁ からの取り戻しだけを確かめる:
+```bash
+.venv/bin/python tools/ui_smoke.py --port 8788 --only-restore
+```
