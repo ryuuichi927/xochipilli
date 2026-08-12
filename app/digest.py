@@ -70,7 +70,15 @@ def _structure_candidates_librosa(y: np.ndarray, sr: int, duration: float) -> li
     if librosa is None or duration < 3.0:
         return []
     try:
+        # The affinity matrix below is dense and frames². At hop=512 a 3.5 min track needs
+        # ~670 MB (and several copies), which thrashed memory for minutes. Coarsen the hop
+        # so frames stay bounded — boundaries are ~8 s apart, so this costs no accuracy.
+        max_frames = 1200
         hop = 512
+        est_frames = int(len(y) / hop) + 1
+        if est_frames > max_frames:
+            hop *= -(-est_frames // max_frames)  # ceil division
+        y = np.asarray(y, dtype=np.float32)
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13, hop_length=hop)
         # Self-similarity novelty (checkerboard kernel via lag matrix)
         R = librosa.segment.recurrence_matrix(mfcc, mode="affinity", metric="cosine", sparse=False)

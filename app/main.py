@@ -45,20 +45,6 @@ load_dotenv(ROOT / ".env", override=False)
 
 app = FastAPI(title="Xochipilli", version="0.1.0-d1")
 
-# Desktop shell uses pywebview load_html → document origin is often "null" / about:blank
-# while API is http://127.0.0.1:PORT. Without CORS, fetch() fails silently in WK and
-# the UI never lists projects (e.g. Bonji Story) or completes import.
-# Local-only tool: open to any Origin including null.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
-
 class _ApiTokenMiddleware(BaseHTTPMiddleware):
     """When XOCHIPILLI_API_TOKEN is set, require it on mutating /api routes."""
 
@@ -75,13 +61,29 @@ class _ApiTokenMiddleware(BaseHTTPMiddleware):
             got = (request.headers.get("x-xochi-token") or "").strip()
             if got != token:
                 return JSONResponse(
-                    {"detail": "invalid or missing X-Xochi-Token"},
+                    {"detail": "stale or missing X-Xochi-Token", "code": "token"},
                     status_code=401,
                 )
         return await call_next(request)
 
 
+# Order matters: added last = outermost. CORS must wrap the token check, otherwise a 401
+# reaches the shell without Access-Control-Allow-Origin and WebKit reports it as the
+# unreadable "Load failed" instead of the real reason.
 app.add_middleware(_ApiTokenMiddleware)
+
+# Desktop shell uses pywebview load_html → document origin is often "null" / about:blank
+# while API is http://127.0.0.1:PORT. Without CORS, fetch() fails silently in WK and
+# the UI never lists projects (e.g. Bonji Story) or completes import.
+# Local-only tool: open to any Origin including null.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 # Prevent double-submit races (same segment generate twice)
 _GEN_LOCKS: set[str] = set()
@@ -331,6 +333,36 @@ def api_restore_project(pid: str, body: ProjectRestoreBody):
     return storage.public_project(storage.save_project(p))
 
 
+def _digest_or_explain(raw_path: Path, pdir: Path) -> dict[str, Any]:
+    """Turn digest crashes into an actionable message instead of a bare 500."""
+    import subprocess
+
+    try:
+        return digest_audio(raw_path, pdir)
+    except ModuleNotFoundError as e:
+        raise HTTPException(
+            503,
+            f"音声解析ライブラリが足りない ({e.name})。"
+            " ターミナルで .venv/bin/pip install -r requirements.txt を実行して。",
+        ) from e
+    except FileNotFoundError as e:
+        raise HTTPException(
+            503,
+            "ffmpeg が見つからない。brew install ffmpeg を実行して、アプリを再起動して。",
+        ) from e
+    except subprocess.CalledProcessError as e:
+        tail = ""
+        if getattr(e, "stderr", None):
+            raw = e.stderr if isinstance(e.stderr, str) else e.stderr.decode("utf-8", "replace")
+            tail = raw.strip().splitlines()[-1][:200] if raw.strip() else ""
+        raise HTTPException(
+            400,
+            f"この音声を解析用WAVに変換できなかった（形式が非対応かファイルが壊れている）。{tail}",
+        ) from e
+    except MemoryError as e:
+        raise HTTPException(507, "解析中にメモリが足りなくなった。曲を短くして試して。") from e
+
+
 @app.post("/api/projects/{pid}/import")
 async def api_import(pid: str, file: UploadFile = File(...)):
     try:
@@ -361,7 +393,7 @@ async def api_import(pid: str, file: UploadFile = File(...)):
         storage.clear_project_media(safe)
         p["program"] = None
 
-        digest = digest_audio(raw_path, pdir)
+        digest = _digest_or_explain(raw_path, pdir)
         stem = Path(file.filename or "track").stem.strip() or "track"
         if not p.get("title") or str(p.get("title")).strip() in {"", "Untitled"}:
             p["title"] = stem

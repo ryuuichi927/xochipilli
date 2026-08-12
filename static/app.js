@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const LANG_KEY = "mfw.lang";
+const NEW_PROJECT_OPTION = "__new__";
 
 /**
  * Desktop shell (pywebview load_html) often has document URL about:blank.
@@ -666,6 +667,9 @@ async function api(path, opts = {}) {
   next.headers = headers;
   const res = await fetch(apiUrl(path), next);
   if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error(t("statusTokenStale") || "stale api token");
+    }
     let detail = res.statusText;
     try {
       const j = await res.json();
@@ -699,10 +703,10 @@ async function refreshProjectList(selectId) {
       }
     })();
   sel.textContent = "";
-  const opt0 = document.createElement("option");
-  opt0.value = "";
-  opt0.textContent = t("projectPlaceholder") || "—";
-  sel.appendChild(opt0);
+  const optNew = document.createElement("option");
+  optNew.value = NEW_PROJECT_OPTION;
+  optNew.textContent = t("projectCreateNew") || "+ New project";
+  sel.appendChild(optNew);
   const projects = data.projects || [];
   for (const p of projects) {
     const o = document.createElement("option");
@@ -717,7 +721,7 @@ async function refreshProjectList(selectId) {
   } else if (projects.length) {
     sel.value = projects[0].id;
   } else {
-    sel.value = "";
+    sel.value = NEW_PROJECT_OPTION;
   }
   return data;
 }
@@ -728,7 +732,12 @@ async function createProject() {
   const p = await api("/api/projects", { method: "POST", body: fd });
   await loadProject(p.id);
   await refreshProjectList(p.id);
+  // A refreshProjectList() still in flight (i18n re-apply, boot) can land after this one
+  // and drop the selection back onto the previous project — pin it.
+  const sel = $("projectSelect");
+  if (sel) sel.value = p.id;
   setStatus(t("statusNew"));
+  return p;
 }
 
 async function loadProject(id) {
@@ -3651,6 +3660,16 @@ function wire() {
   };
   $("projectSelect").onchange = async (e) => {
     const id = e.target.value;
+    if (id === NEW_PROJECT_OPTION) {
+      const back = state.project ? state.project.id : "";
+      try {
+        await createProject();
+      } catch (err) {
+        setStatus(err.message);
+        if (back) e.target.value = back;
+      }
+      return;
+    }
     if (id) await loadProject(id).catch((err) => setStatus(err.message));
   };
   $("btnPlay").onclick = () => togglePlay();

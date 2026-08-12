@@ -63,3 +63,20 @@ using load_html shell …
 - **ffmpeg が見つからない（Dock）:** Homebrew の `/opt/homebrew/bin` を PATH に足す処理済み。未インストールなら `brew install ffmpeg`
 - **pywebview 無し:** `.venv/bin/pip install pywebview`
 - **ブラウザで開きたいときだけ:** `XOCHIPILLI_SHELL=browser`（Dock 既定では開かない）
+- **新規プロジェクトも曲の導入も効かない（`認証トークンが古い`）:** 窓が持っているトークンと
+  サーバのトークンがずれている。アプリを終了して開き直す。トークンは
+  `~/Library/Application Support/Xochipilli/api_token` に永続化されるので、次からはずれない
+- **`音声解析ライブラリが足りない (…)`:** `.venv` が中途半端。
+  `cd <project> && .venv/bin/pip install -r requirements.txt` のあと再起動。
+  起動時にも検査して同じ内容を知らせる
+- **導入が何分も終わらない:** iCloud Drive 上の曲は macOS が実体をダウンロードするまで進まない。
+  Finder でその曲を開いて実体化させるか、ローカルにコピーしてから導入する
+
+## ボタンの自動確認
+UI の全ボタン（フォルダへ飛ぶ / 新規作成 / 改名 / 削除 / 書き出し）と曲の導入を
+実ブラウザで一気に押して確認する:
+```bash
+.venv/bin/python -m uvicorn app.server:app --port 8788    # 別窓（トークン無し）
+.venv/bin/python tools/ui_smoke.py --port 8788 --import-file ~/path/to/track.mp3
+```
+使い捨てプロジェクトを作ってその中だけで試し、最後に消すので既存プロジェクトは触らない。

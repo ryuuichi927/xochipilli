@@ -148,7 +148,9 @@
   function pid() {
     try {
       const sel = document.getElementById("projectSelect");
-      return (sel && sel.value) || "";
+      const v = (sel && sel.value) || "";
+      // First entry is the "create new project" action, not a project id.
+      return v === "__new__" ? "" : v;
     } catch (_) {
       return "";
     }

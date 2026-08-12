@@ -81,3 +81,20 @@ nav ok — load_html shell
 - **No pywebview:** `.venv/bin/pip install pywebview`
 - **Ben's Tool PYTHONPATH pollution:** desktop_app strips `/.bentool/` from `sys.path`
 - **Browser only when you want it:** `XOCHIPILLI_SHELL=browser` (never default from Dock)
+- **New project / import do nothing (`Auth token is stale`):** the window holds a different
+  token than the server. Quit and relaunch. The token lives in
+  `~/Library/Application Support/Xochipilli/api_token`, so it stays put across restarts
+- **`音声解析ライブラリが足りない (…)` / missing analysis library:** the venv is incomplete —
+  `.venv/bin/pip install -r requirements.txt`, then relaunch. Launch also preflights this
+- **Import never finishes:** a track still stored in iCloud Drive blocks until macOS
+  downloads it. Materialize it in Finder, or copy it locally first
+
+## Button smoke test
+Clicks every UI button (open folder, create, rename, delete, exports) and imports a real
+track in a real browser:
+```bash
+.venv/bin/python -m uvicorn app.server:app --port 8788    # separate, token-less
+.venv/bin/python tools/ui_smoke.py --port 8788 --import-file ~/path/to/track.mp3
+```
+It works inside a throwaway project and deletes it at the end, so existing projects are
+never touched.

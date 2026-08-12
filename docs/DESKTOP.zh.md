@@ -46,3 +46,16 @@ macOS **会拒绝 .app 直接 exec Documents 内的脚本**。
 - **Dock 找不到 ffmpeg：** 已把 `/opt/homebrew/bin` 加入 PATH；需先 `brew install ffmpeg`
 - **没有 pywebview：** `.venv/bin/pip install pywebview`
 - **仅浏览器：** `XOCHIPILLI_SHELL=browser`
+- **新建项目和导入都没反应（`认证令牌已过期`）：** 窗口与服务器的令牌不一致，退出重开即可。
+  令牌保存在 `~/Library/Application Support/Xochipilli/api_token`
+- **提示缺少音频分析库：** venv 不完整，执行 `.venv/bin/pip install -r requirements.txt` 后重启；
+  启动时也会预检并提示
+- **导入迟迟不结束：** iCloud Drive 上的曲目要等 macOS 下载实体，先在 Finder 打开或复制到本地
+
+## 按钮自动检查
+在真实浏览器里依次点击所有按钮，并导入一首真实曲目：
+```bash
+.venv/bin/python -m uvicorn app.server:app --port 8788    # 另开，无令牌
+.venv/bin/python tools/ui_smoke.py --port 8788 --import-file ~/path/to/track.mp3
+```
+它只在一个临时项目里操作并在结束时删除，不会碰到已有项目。

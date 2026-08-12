@@ -176,9 +176,38 @@ def main() -> int:
         "_ensure_media_path",
         "XOCHIPILLI_API_TOKEN",
         "__XOCHI_API_TOKEN__",
+        "_warn_missing_deps",
     )
     for n in desk_more:
         (ok if n in desk else bad)(f"has {n}")
+
+    # A 401 that skips CORS reaches WKWebView as the unreadable "Load failed", which is
+    # how a stale token used to masquerade as a broken app. CORS must be added last so it
+    # wraps the token check.
+    main_py = (ROOT / "app/main.py").read_text(encoding="utf-8")
+    i_token = main_py.find("add_middleware(_ApiTokenMiddleware)")
+    i_cors = main_py.find("add_middleware(\n    CORSMiddleware")
+    if i_token < 0 or i_cors < 0:
+        bad("cannot locate middleware registration order")
+    elif i_token < i_cors:
+        ok("CORS middleware wraps the API token check")
+    else:
+        bad("token middleware is outside CORS — 401 will surface as 'Load failed'")
+
+    app_js = (ROOT / "static/app.js").read_text(encoding="utf-8")
+    (ok if 'NEW_PROJECT_OPTION = "__new__"' in app_js else bad)("app.js has create-new option")
+    (ok if 'projectCreateNew' in app_js else bad)("project dropdown offers create-new")
+    (ok if "statusTokenStale" in app_js else bad)("app.js explains a stale token")
+    i18n_js = (ROOT / "static/i18n.js").read_text(encoding="utf-8")
+    for key in ("projectCreateNew", "statusTokenStale"):
+        n_lang = i18n_js.count(f"{key}:")
+        (ok if n_lang >= 3 else bad)(f"i18n {key} in {n_lang}/3 languages")
+
+    digest_py = (ROOT / "app/digest.py").read_text(encoding="utf-8")
+    (ok if "max_frames" in digest_py else bad)("structure analysis caps its affinity matrix")
+    main_py_checks = ("_digest_or_explain", "ModuleNotFoundError", "ffmpeg が見つからない")
+    for n in main_py_checks:
+        (ok if n in main_py else bad)(f"import errors explain {n}")
 
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/api/health", timeout=1.5) as r:

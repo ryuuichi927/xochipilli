@@ -360,6 +360,58 @@ def _preflight_http() -> tuple[bool, str]:
         return False, f"GET / failed: {e}"
 
 
+#: Digest needs these at import-time; a half-built .venv only failed once the user
+#: pressed "曲を導入", which looked like a broken app instead of a missing library.
+_DIGEST_DEPS = (
+    "numpy",
+    "soundfile",
+    "librosa",
+    "scipy",
+    "sklearn",
+    "joblib",
+    "msgpack",
+    "packaging",
+    "pooch",
+    "numba",
+)
+
+
+def _missing_deps(py: str) -> list[str]:
+    probe = (
+        "import importlib.util as u,sys;"
+        f"print(' '.join(m for m in {list(_DIGEST_DEPS)!r} if u.find_spec(m) is None))"
+    )
+    try:
+        out = subprocess.run(
+            [py, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            cwd=str(ROOT),
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        _log(f"dep preflight skipped: {e}")
+        return []
+    if out.returncode != 0:
+        _log(f"dep preflight failed rc={out.returncode}: {(out.stderr or '').strip()[:200]}")
+        return []
+    return (out.stdout or "").split()
+
+
+def _warn_missing_deps(py: str) -> None:
+    missing = _missing_deps(py)
+    if not missing:
+        return
+    names = ", ".join(missing)
+    _log(f"WARN: missing digest deps: {names}")
+    _alert(
+        f"音声解析に必要な部品が足りない: {names}\n"
+        "ターミナルで次を実行して、アプリを再起動して:\n"
+        f"cd {ROOT} && .venv/bin/pip install -r requirements.txt",
+        critical=True,
+    )
+
+
 def _start_server() -> subprocess.Popen | None:
     _ensure_api_token()
     if _health_ok():
@@ -409,6 +461,7 @@ def _start_server() -> subprocess.Popen | None:
         raise SystemExit(2)
 
     py = str(VENV_PY if VENV_PY.is_file() else sys.executable)
+    _warn_missing_deps(py)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
