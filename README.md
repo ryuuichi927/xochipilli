@@ -2,7 +2,7 @@
 
 **English** | [日本語](README.ja.md) | [中文](README.zh.md)
 
-Local, **pro-oriented** music → film workbench for your Mac.  
+Local, **Manual-oriented** music → film workbench for your Mac.  
 The name comes from the Aztec deity **Xochipilli** 
 
 Designed by **Ryuichi Hamakawa**.
