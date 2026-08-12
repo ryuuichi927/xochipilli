@@ -184,8 +184,7 @@ def _cors_ok() -> bool:
         return False
 
 
-def _kill_our_listeners_on_port(port: int) -> None:
-    """Stop only Xochipilli/uvicorn listeners on PORT — never SIGKILL strangers."""
+def _listener_pids_on_port(port: int) -> list[int]:
     try:
         r = subprocess.run(
             ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
@@ -195,41 +194,82 @@ def _kill_our_listeners_on_port(port: int) -> None:
         )
     except OSError as e:
         _log(f"lsof port {port}: {e}")
-        return
-    pids: list[str] = []
+        return []
+    pids: list[int] = []
     for ln in (r.stdout or "").splitlines()[1:]:
         parts = ln.split()
-        if len(parts) < 2 or not parts[1].isdigit():
-            continue
-        pid = parts[1]
-        cmd = " ".join(parts[8:]) if len(parts) > 8 else parts[0]
-        low = cmd.lower()
-        if any(
-            m in low
-            for m in (
-                "uvicorn",
-                "app.server",
-                "desktop_app",
-                "xochipilli",
-                "music-film-workbench",
-            )
-        ):
-            pids.append(pid)
-        else:
-            _log(f"leave foreign listener pid={pid} cmd={cmd[:80]}")
+        if len(parts) >= 2 and parts[1].isdigit():
+            pids.append(int(parts[1]))
+    return pids
+
+
+def _process_command(pid: int) -> str:
+    try:
+        r = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return (r.stdout or "").strip()
+    except OSError:
+        return ""
+
+
+def _is_our_server_pid(pid: int) -> bool:
+    """True if this PID looks like a Xochipilli/uvicorn server we may stop."""
+    cmd = _process_command(pid).lower()
+    if not cmd:
+        # Fallback: if /api/health says Xochipilli on this port, treat listeners as ours.
+        return False
+    return any(
+        m in cmd
+        for m in (
+            "uvicorn",
+            "app.server",
+            "desktop_app",
+            "xochipilli",
+            "music-film-workbench",
+            "/projects/xochipilli",
+        )
+    )
+
+
+def _kill_our_listeners_on_port(port: int, *, force_product: bool = False) -> None:
+    """Stop Xochipilli/uvicorn listeners on PORT — never SIGKILL unrelated apps.
+
+    force_product: also stop listeners when live /api/health is product=Xochipilli
+    (covers cases where `ps` is unavailable or cmdline is truncated).
+    """
+    pids = _listener_pids_on_port(port)
     if not pids:
+        return
+    product_ours = False
+    if force_product:
+        h = _health_payload() or {}
+        product_ours = bool(h.get("ok")) and (
+            not h.get("product") or h.get("product") == "Xochipilli"
+        )
+    ours: list[int] = []
+    for pid in pids:
+        if _is_our_server_pid(pid) or product_ours:
+            ours.append(pid)
+        else:
+            cmd = _process_command(pid) or "(unknown)"
+            _log(f"leave foreign listener pid={pid} cmd={cmd[:120]}")
+    if not ours:
         _log(f"no Xochipilli listeners on :{port} to stop")
         return
-    _log(f"stopping our listeners on :{port} pids={pids[:12]}")
-    for pid in pids:
+    _log(f"stopping our listeners on :{port} pids={ours[:12]}")
+    for pid in ours:
         try:
-            os.kill(int(pid), signal.SIGTERM)
+            os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError, OSError, ValueError):
             pass
     time.sleep(0.45)
-    for pid in pids:
+    for pid in ours:
         try:
-            os.kill(int(pid), signal.SIGKILL)
+            os.kill(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError, ValueError):
             pass
 
@@ -290,7 +330,7 @@ def _start_server() -> subprocess.Popen | None:
             )
             return None
         _log("reuse blocked: CORS/token mismatch — restarting our listeners")
-        _kill_our_listeners_on_port(PORT)
+        _kill_our_listeners_on_port(PORT, force_product=True)
         time.sleep(0.35)
     elif _port_open(PORT):
         for _ in range(24):
@@ -300,7 +340,7 @@ def _start_server() -> subprocess.Popen | None:
                     _log(f"reuse server at {URL} (became healthy, cors/token ok)")
                     return None
                 _log("port open + healthy but CORS/token mismatch — restarting")
-                _kill_our_listeners_on_port(PORT)
+                _kill_our_listeners_on_port(PORT, force_product=True)
                 time.sleep(0.35)
                 break
             time.sleep(0.25)
@@ -312,6 +352,20 @@ def _start_server() -> subprocess.Popen | None:
             _log(f"WARN: {msg}")
             _alert(msg, critical=True)
             raise SystemExit(2)
+
+    if _port_open(PORT) and not _health_ok():
+        msg = f"ポート {PORT} がまだ塞がっている。Xochipilli を起動できない。"
+        _log(f"WARN: {msg}")
+        _alert(msg, critical=True)
+        raise SystemExit(2)
+    if _port_open(PORT) and _health_ok() and not _token_compatible(_health_payload()):
+        msg = (
+            f"ポート {PORT} の既存サーバを更新できなかった。"
+            " 古いプロセスが残っている可能性がある。"
+        )
+        _log(f"WARN: {msg}")
+        _alert(msg, critical=True)
+        raise SystemExit(2)
 
     py = str(VENV_PY if VENV_PY.is_file() else sys.executable)
     env = os.environ.copy()
@@ -334,22 +388,28 @@ def _start_server() -> subprocess.Popen | None:
     ]
     SESSION_LOG.parent.mkdir(parents=True, exist_ok=True)
     _log(f"starting {URL} …")
-    log_f = open(SESSION_LOG, "a", encoding="utf-8", errors="replace")
-    log_f.write(f"\n==== uvicorn spawn pid_parent={os.getpid()} ====\n")
-    log_f.flush()
+    log_f = None
+    try:
+        log_f = open(SESSION_LOG, "a", encoding="utf-8", errors="replace")
+        log_f.write(f"\n==== uvicorn spawn pid_parent={os.getpid()} ====\n")
+        log_f.flush()
+        stdout_target: Any = log_f
+    except OSError as e:
+        _log(f"session.log open failed ({e}); uvicorn stdout → DEVNULL")
+        stdout_target = subprocess.DEVNULL
     proc = subprocess.Popen(
         cmd,
         cwd=str(ROOT),
         env=env,
-        stdout=log_f,
+        stdout=stdout_target,
         stderr=subprocess.STDOUT,
         start_new_session=True,
         text=True,
     )
-    for _ in range(80):
-        if _health_ok():
+    for _ in range(200):  # ~30s — cold librosa/numpy import can be slow under Dock
+        if _health_ok() and _token_compatible(_health_payload()):
             cors = _cors_ok()
-            _log(f"server ready cors={'ok' if cors else 'MISSING'}")
+            _log(f"server ready cors={'ok' if cors else 'MISSING'} token=ok")
             if not cors:
                 _log("WARN: server up but CORS headers still missing")
             return proc
@@ -1407,6 +1467,7 @@ def main() -> int:
 
     target = f"{URL}/"
     shell = (os.environ.get("XOCHIPILLI_SHELL") or "webview").strip().lower()
+    _log(f"entering shell={shell}")
 
     if shell in ("browser", "chrome", "safari", "system"):
         rc = _run_browser_only(target, keep_server=server is not None)
@@ -1414,6 +1475,7 @@ def main() -> int:
             _stop_server(server)
         return rc
 
+    _log("starting pywebview window…")
     rc = _run_pywebview(target)
     _stop_server(server)
     return rc
