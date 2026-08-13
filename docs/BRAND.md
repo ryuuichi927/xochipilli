@@ -25,4 +25,4 @@ UI gold accent toward `#C9A227`. Black ground assumed.
 Faint Aztec flower lattice: `static/brand/bg-aztec-flower.svg` (`body::before` opacity ~0.045). Panels keep readability.
 
 ## Header typeface
-**Cinzel** (candidate #1, adopted). See `FONT_CANDIDATES.md`.
+**Cinzel** (adopted). Header `.brand-title` only — see [DECISIONS.md](DECISIONS.md).

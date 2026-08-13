@@ -25,4 +25,4 @@ UI 金アクセント `#C9A227` に寄せる。黒地前提。
 うっすらアステカ花格子: `static/brand/bg-aztec-flower.svg`（`body::before` opacity ~0.045）。操作面はパネルで可読性維持。
 
 ## ヘッダー字体
-**Cinzel**（案1・採用）。詳細は `FONT_CANDIDATES.ja.md`。
+**Cinzel**（採用）。ヘッダー `.brand-title` のみ — [DECISIONS.md](DECISIONS.md)。

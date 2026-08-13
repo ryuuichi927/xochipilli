@@ -33,8 +33,12 @@ data/**/*.webp
 *.log
 
 # Scratch
-tmp/*
-!tmp/restart-server.sh
-!tmp/verify_fixpack.py
-!tmp/.gitkeep
-*.icns.bak
+tmp/
+*.bak
+
+# Build output — the bundle is assembled by native/build_launcher.sh from
+# native/Info.plist + native/xochipilli_launcher.c + static/brand/icon-primary.png
+Xochipilli.app/
+
+# Personal working notes
+private/

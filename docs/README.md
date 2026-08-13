@@ -7,18 +7,23 @@ Product docs ship in three languages. File order convention: **English (default 
 |-------|----|----|-----|
 | Product README | [../README.md](../README.md) | [../README.ja.md](../README.ja.md) | [../README.zh.md](../README.zh.md) |
 | Desktop launch | [DESKTOP.md](DESKTOP.md) | [DESKTOP.ja.md](DESKTOP.ja.md) | [DESKTOP.zh.md](DESKTOP.zh.md) |
-| Desktop incidents (2026-08-04) | [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) | same | — |
 | Keyboard | [KEYS.md](KEYS.md) | [KEYS.ja.md](KEYS.ja.md) | [KEYS.zh.md](KEYS.zh.md) |
 | Video API | [VIDEO_API.md](VIDEO_API.md) | [VIDEO_API.ja.md](VIDEO_API.ja.md) | [VIDEO_API.zh.md](VIDEO_API.zh.md) |
 | Brand | [BRAND.md](BRAND.md) | [BRAND.ja.md](BRAND.ja.md) | [BRAND.zh.md](BRAND.zh.md) |
-| Header font | [FONT_CANDIDATES.md](FONT_CANDIDATES.md) | [FONT_CANDIDATES.ja.md](FONT_CANDIDATES.ja.md) | [FONT_CANDIDATES.zh.md](FONT_CANDIDATES.zh.md) |
+| **Design decisions** | [DECISIONS.md](DECISIONS.md) | — | — |
 | **Positioning / differentiation** | [POSITIONING.md](POSITIONING.md) | [POSITIONING.ja.md](POSITIONING.ja.md) | — |
 | **Craft / Taste (standard edit + personalization layer)** | [CRAFT.md](CRAFT.md) | same file (JA section at top) | — |
-| Dev / build log | [DEV_LOG.en.md](DEV_LOG.en.md) (summary) | [DEV_LOG.md](DEV_LOG.md) (full JA) | [DEV_LOG.zh.md](DEV_LOG.zh.md) (summary) |
+| Canva export | [CANVA.md](CANVA.md) | — | — |
 
-## Note on DEV_LOG
-The full working log stays in **Japanese** (`DEV_LOG.md`) because it is the day-to-day build diary.  
-EN / ZH files are **short summaries** for orientation, not line-by-line translations.
+## What is not here
+The build diary, incident write-ups, planning notes, and the typeface shortlist are
+personal working documents. They live outside the repository in `private/`, which is
+git-ignored and mirrored to a private repo. Decisions from that log that are worth
+publishing are rewritten into [DECISIONS.md](DECISIONS.md) by hand.
+
+## Note on DECISIONS
+Why the product behaves as it does, including the paths that were tried and rejected, and
+an honest list of current limitations. English only — it is a specification, not a diary.
 
 ## Note on POSITIONING
 Market map and differentiation vs Freebeat, Neural Frames, local MV pipelines, etc.  

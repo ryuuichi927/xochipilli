@@ -100,6 +100,9 @@ def main() -> int:
     print("=== Xochipilli phase check ===")
     ffmpeg = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
     print("P0.1 ffmpeg:", "ok" if ffmpeg.returncode == 0 else "FAIL")
+    # ffmpeg is required at runtime for import and export, so a missing binary is a failure
+    # rather than a note.
+    assert ffmpeg.returncode == 0, "ffmpeg is not runnable (brew install ffmpeg)"
     with tempfile.TemporaryDirectory(prefix="xochi-phase-") as td:
         work = Path(td)
         r0 = check_p0(work)
@@ -124,6 +127,11 @@ def main() -> int:
         return shell.returncode
     print("ALL PHASE CHECKS PASSED")
     return 0
+
+
+def test_digest_phases() -> None:
+    """Entry point for pytest; run this file directly to see the per-phase output."""
+    assert main() == 0, "phase checks failed — run tests/test_digest_phases.py for detail"
 
 
 if __name__ == "__main__":

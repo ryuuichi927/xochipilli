@@ -11,7 +11,7 @@ Designed by **Ryuichi Hamakawa**.
 
 ### Desktop window (recommended)
 ```bash
-cd /path/to/music-film-workbench
+cd /path/to/xochipilli
 ./RUN_DESKTOP.sh
 # or Dock / Applications → Xochipilli.app
 ```
@@ -52,21 +52,33 @@ cp .env.example .env
 
 Without `.env`, the default is `mock`. Under a real provider (`xai` / `fal`), failures return an error — they are not silently treated as successful takes.
 
+## Development
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest        # desktop shell contracts + digest phase checks
+./native/build_launcher.sh        # rebuild Xochipilli.app (build output, not in git)
+```
+
 ## Data layout
+
+Your work lives **outside the repo**, so updating, moving, or re-cloning the code can never
+touch it. Default root is `~/Documents/Xochipilli`; override with `XOCHIPILLI_DATA`.
+`<data>` below means that root.
 
 | Path | Role |
 |------|------|
-| `data/projects/<id>/project.json` | Work metadata, segments, adopted clip refs (**no full series**) |
-| `data/projects/<id>/digest.json` | Digest detail (series, peaks, …); used for segment features |
-| `data/projects/<id>/source.*` | Imported audio (**one current** file; re-import replaces) |
-| `data/projects/<id>/analysis.wav` | Mono signal for digest |
-| `data/projects/<id>/clips/` | Take mp4s, segment audio slices, chain frames, `program.mp4` |
-| `data/projects/<id>/refs/` | Per-segment stills (i2v) |
+| `<data>/projects/<id>/project.json` | Work metadata, segments, adopted clip refs (**no full series**) |
+| `<data>/projects/<id>/digest.json` | Digest detail (series, peaks, …); used for segment features |
+| `<data>/projects/<id>/source.*` | Imported audio (**one current** file; re-import replaces) |
+| `<data>/projects/<id>/analysis.wav` | Mono signal for digest |
+| `<data>/projects/<id>/clips/` | Take mp4s, segment audio slices, chain frames, `program.mp4` |
+| `<data>/projects/<id>/refs/` | Per-segment stills (i2v) |
+| iCloud `Xochipilli/Archive/` | Cold projects parked to free local disk (`XOCHIPILLI_COLD_DAYS`) |
 | `theory/` | Digest / mapping theory JSON |
 | `static/` | UI (`app.js`, i18n, style, brand, fonts) |
 | `app/` | FastAPI backend |
-| `docs/` | KEYS, VIDEO_API, BRAND, DESKTOP, DEV_LOG, … |
-| `tmp/` | Dev scratch (not deliverables) |
+| `docs/` | KEYS, VIDEO_API, BRAND, DESKTOP, DECISIONS, … |
 
 Deletes (project / segment / take) keep **JSON and disk in sync**.  
 Clips missing from JSON are orphans (old takes) and may be GC’d.
@@ -80,16 +92,18 @@ Clips missing from JSON are orphans (old takes) and may be GC’d.
 | Keyboard | [KEYS](docs/KEYS.md) | [KEYS.ja](docs/KEYS.ja.md) | [KEYS.zh](docs/KEYS.zh.md) |
 | Video API | [VIDEO_API](docs/VIDEO_API.md) | [VIDEO_API.ja](docs/VIDEO_API.ja.md) | [VIDEO_API.zh](docs/VIDEO_API.zh.md) |
 | Brand | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
-| Header font | [FONT_CANDIDATES](docs/FONT_CANDIDATES.md) | [FONT_CANDIDATES.ja](docs/FONT_CANDIDATES.ja.md) | [FONT_CANDIDATES.zh](docs/FONT_CANDIDATES.zh.md) |
-| Dev log | [DEV_LOG](docs/DEV_LOG.md) (JA body) | same | [summary ZH](docs/DEV_LOG.zh.md) · [summary EN](docs/DEV_LOG.en.md) |
+| Design decisions | [DECISIONS](docs/DECISIONS.md) | — | — |
+| Positioning | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
 | Docs index | [docs/README.md](docs/README.md) | | |
 
 ## Brand & type
 - Logo roles: [docs/BRAND.md](docs/BRAND.md) (primary=03 / casual=01 / wait flower=02)
-- Header typeface: **Cinzel** (`.brand-title` only) — [docs/FONT_CANDIDATES.md](docs/FONT_CANDIDATES.md)
+- Header typeface: **Cinzel** (`.brand-title` only) — [docs/DECISIONS.md](docs/DECISIONS.md)
 
 ## Privacy note
-This repo is intended **private** by default. Do not commit `.env`, `data/projects/`, or personal media (see `.gitignore`).
+This repo is **private** while the product is pre-release. Personal working notes are kept
+out of it entirely, in a git-ignored `private/` folder. Do not commit `.env`, imported
+media, or anything holding an absolute path to your own machine (see `.gitignore`).
 
 ## License
 Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**  

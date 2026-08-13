@@ -2,8 +2,8 @@
 
 **English** | [日本語](KEYS.ja.md) | [中文](KEYS.zh.md)
 
-**This file is canonical.** Chat suggestions disappear.  
-**Only keys the designer explicitly adopts get implemented.** Do not ship “nice to have” shortcuts on your own.
+**This file is canonical.** The keymap is deliberately small: a shortcut is added only
+once it has been used enough to be missed, not because the key was free.
 
 **Rule:** shortcuts are disabled while a text field is focused.
 
@@ -39,7 +39,7 @@
 
 ## Not adopted — do not implement (memo only)
 
-Do not code these until the designer explicitly adopts them.
+Considered and left out, kept here so the same ideas are not re-litigated.
 
 | Idea | Proposed action |
 |------|-----------------|

@@ -11,7 +11,7 @@ Load path (2026-08-04 rebuild 0.2.0):
   No cocoa content-view reassignment / NSView-container patches. No second load_html thrash.
   Skip inject_pywebview by default (UI uses FastAPI fetch).
 
-See docs/DESKTOP.md and docs/DESKTOP_INCIDENTS_2026-08-04.md.
+See docs/DESKTOP.md and docs/DECISIONS.md.
 """
 
 from __future__ import annotations

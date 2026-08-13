@@ -103,5 +103,5 @@ If a tool does not combine **local × author-cut segments × per-segment scene p
 ## Maintenance
 
 - Revisit this file when a new tool claims “local music segment workbench” or when positioning questions repeat.
-- Full build diary stays in [DEV_LOG.md](DEV_LOG.md) (JA). This file is the **positioning** source of truth.
+- Shipped design choices are in [DECISIONS.md](DECISIONS.md). This file is the **positioning** source of truth.
 - Survey snapshot date: 2026-08-04.

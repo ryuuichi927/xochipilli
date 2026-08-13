@@ -82,7 +82,7 @@ macOS は **.app から Documents 内を直接 exec すると拒否**する。
 任意: `XOCHIPILLI_SHELL=browser` のときだけシステムブラウザ。  
 以前の Chrome `--app` プロファイルは起動時に停止する。
 
-詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
+背景: [DECISIONS.md](DECISIONS.md)
 
 ## 他の起動手段
 
@@ -110,7 +110,6 @@ using load_html shell …
   1. まずブラウザで http://127.0.0.1:8787/ が暗く見えるか確認（見える＝サーバ OK）
   2. `session.log` に `using load_html shell` があるか
   3. Dock `.app` 経由か確認（素の python だと WK の localhost が弱い）
-  詳細: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
 - **ポート衝突:** `.env` の `PORT=`。無関係プロセスは殺さない（自前 uvicorn のみ停止）
 - **ffmpeg が見つからない（Dock）:** Homebrew の `/opt/homebrew/bin` を PATH に足す処理済み。未インストールなら `brew install ffmpeg`
 - **pywebview 無し:** `.venv/bin/pip install pywebview`

@@ -93,7 +93,7 @@ Optional: `XOCHIPILLI_SHELL=browser` opens the system browser (opt-in only).
 
 Legacy Chrome `--app` profiles are **killed on launch** so old sessions do not reappear.
 
-See [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md) and [CRAFT.md](CRAFT.md).
+See [CRAFT.md](CRAFT.md) and [DECISIONS.md](DECISIONS.md).
 
 ## Other ways to start
 
@@ -126,7 +126,6 @@ nav ok — load_html shell
   1. Open http://127.0.0.1:8787/ in a normal browser — if dark UI shows, the **server is fine**
   2. `session.log` should contain `using load_html shell` and `xochi-inline-css` build, **not** thrash reload / `setContentView_`
   3. Confirm launch via Dock `.app` so `NSBundle` id is `local.xochipilli.d1` (bare python may break WK local HTTP)
-  4. Details: [DESKTOP_INCIDENTS_2026-08-04.md](DESKTOP_INCIDENTS_2026-08-04.md)
 - **Dark UI but no Unmatch / affect sliders:** Craft loads after first paint. Check Web Inspector console for `craft_ui load failed`; ensure server serves `/static/craft_ui.js`.
 - **Dark UI but dead clicks / no resize:** if log has `setContentView_(WKWebView)` → old Incident G/H patch; use stock pywebview only.
 - **Port clash:** set `PORT=` in `.env`, or free 8787

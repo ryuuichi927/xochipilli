@@ -1,0 +1,4 @@
+# Development-only. Runtime deps are in requirements.txt.
+#   .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
+-r requirements.txt
+pytest>=8.0

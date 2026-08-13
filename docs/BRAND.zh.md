@@ -25,4 +25,4 @@ UI 金色强调靠近 `#C9A227`。默认黑底。
 淡淡的阿兹特克花格：`static/brand/bg-aztec-flower.svg`（`body::before` opacity ~0.045）。操作面靠面板保持可读。
 
 ## 页眉字体
-**Cinzel**（候选 #1，已采用）。详见 `FONT_CANDIDATES.zh.md`。
+**Cinzel**（已采用）。仅用于标题 `.brand-title` — 见 [DECISIONS.md](DECISIONS.md)。

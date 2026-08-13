@@ -128,9 +128,11 @@ def main() -> int:
     else:
         bad("craft_ui.js missing boot try/catch hardening")
 
+    # Xochipilli.app is build output (native/build_launcher.sh). A fresh clone has not
+    # built it yet, so its absence is reported but is not a contract failure.
     launcher = ROOT / "Xochipilli.app/Contents/MacOS/Xochipilli"
     if not launcher.is_file():
-        bad("repo launcher missing")
+        ok("repo launcher not built yet (run ./native/build_launcher.sh)")
     else:
         r = subprocess.run(["file", str(launcher)], capture_output=True, text=True)
         out = r.stdout + r.stderr
@@ -144,9 +146,9 @@ def main() -> int:
         r = subprocess.run(["file", str(apps)], capture_output=True, text=True)
         (ok if "Mach-O" in r.stdout else bad)("Apps launcher Mach-O")
     else:
-        bad("Apps launcher missing")
+        ok("Apps launcher not installed")
 
-    plist = (ROOT / "Xochipilli.app/Contents/Info.plist").read_text(encoding="utf-8")
+    plist = (ROOT / "native/Info.plist").read_text(encoding="utf-8")
     (ok if "NSLocalNetworkUsageDescription" in plist else bad)("plist local network usage")
     (ok if "NSAllowsLocalNetworking" in plist else bad)("plist allows local networking")
 
@@ -167,9 +169,13 @@ def main() -> int:
         if root_line == str(ROOT):
             ok("ProjectRoot matches clone")
         else:
-            bad(f"ProjectRoot={root_line!r} != {ROOT}")
+            bad(f"ProjectRoot={root_line!r} != {ROOT} — rerun ./native/build_launcher.sh")
     else:
-        bad("ProjectRoot file missing")
+        ok("ProjectRoot not built yet (run ./native/build_launcher.sh)")
+
+    bs = (ROOT / "native/build_launcher.sh").read_text(encoding="utf-8")
+    for n in ("native/Info.plist", "iconutil", "ProjectRoot"):
+        (ok if n in bs else bad)(f"build script assembles {n}")
 
     desk_more = (
         "_kill_our_listeners_on_port",
@@ -277,6 +283,11 @@ def main() -> int:
         return 1
     print("TEST_DESKTOP_SHELL_PASS fails=0")
     return 0
+
+
+def test_desktop_shell_contracts() -> None:
+    """Entry point for pytest; run this file directly to see the per-check list."""
+    assert main() == 0, "desktop shell contracts failed — run tests/test_desktop_shell.py for detail"
 
 
 if __name__ == "__main__":

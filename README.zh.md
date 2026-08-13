@@ -11,7 +11,7 @@
 
 ### 桌面窗口（推荐）
 ```bash
-cd /path/to/music-film-workbench
+cd /path/to/xochipilli
 ./RUN_DESKTOP.sh
 # 或 Dock / 应用程序 中的 Xochipilli.app
 ```
@@ -52,21 +52,32 @@ cp .env.example .env
 
 未配置 `.env` 时默认为 `mock`。真实提供方（`xai` / `fal`）失败时会报错，不会悄悄当成成功成片。
 
+## 开发
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest        # 桌面外壳契约 + digest 阶段检查
+./native/build_launcher.sh        # 重新构建 Xochipilli.app（构建产物，不入 git）
+```
+
 ## 数据布局
+
+作品保存在 **仓库之外**：更新、移动或重新 clone 代码都不会碰到它。
+默认根目录为 `~/Documents/Xochipilli`（可用 `XOCHIPILLI_DATA` 覆盖）。下表的 `<data>` 指该目录。
 
 | 路径 | 作用 |
 |------|------|
-| `data/projects/<id>/project.json` | 作品元数据、区间、采用片段引用（**不含完整 series**） |
-| `data/projects/<id>/digest.json` | 消化详情（series、peaks 等）；服务端用于区间特征 |
-| `data/projects/<id>/source.*` | 导入音源（**当前 1 份**；重导会替换） |
-| `data/projects/<id>/analysis.wav` | 消化用单声道信号 |
-| `data/projects/<id>/clips/` | 成片 mp4、区间音频切片、衔接帧、`program.mp4` |
-| `data/projects/<id>/refs/` | 区间参考静帧（i2v） |
+| `<data>/projects/<id>/project.json` | 作品元数据、区间、采用片段引用（**不含完整 series**） |
+| `<data>/projects/<id>/digest.json` | 消化详情（series、peaks 等）；服务端用于区间特征 |
+| `<data>/projects/<id>/source.*` | 导入音源（**当前 1 份**；重导会替换） |
+| `<data>/projects/<id>/analysis.wav` | 消化用单声道信号 |
+| `<data>/projects/<id>/clips/` | 成片 mp4、区间音频切片、衔接帧、`program.mp4` |
+| `<data>/projects/<id>/refs/` | 区间参考静帧（i2v） |
+| iCloud `Xochipilli/Archive/` | 长期未打开的作品会移到这里以释放本地磁盘（`XOCHIPILLI_COLD_DAYS`） |
 | `theory/` | digest / mapping 理论 JSON |
 | `static/` | UI（app.js / i18n / style / brand / fonts） |
 | `app/` | FastAPI 后端 |
-| `docs/` | KEYS / VIDEO_API / BRAND / DESKTOP / DEV_LOG 等 |
-| `tmp/` | 开发临时目录（不放成品） |
+| `docs/` | KEYS / VIDEO_API / BRAND / DESKTOP / DECISIONS 等 |
 
 删除（设置里删项目 / 删区间 / 删成片）会保持 **JSON 与磁盘一致**。  
 JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
@@ -80,16 +91,17 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 | 键盘 | [KEYS](docs/KEYS.md) | [KEYS.ja](docs/KEYS.ja.md) | [KEYS.zh](docs/KEYS.zh.md) |
 | 影像 API | [VIDEO_API](docs/VIDEO_API.md) | [VIDEO_API.ja](docs/VIDEO_API.ja.md) | [VIDEO_API.zh](docs/VIDEO_API.zh.md) |
 | 品牌 | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
-| 标题字体 | [FONT](docs/FONT_CANDIDATES.md) | [FONT.ja](docs/FONT_CANDIDATES.ja.md) | [FONT.zh](docs/FONT_CANDIDATES.zh.md) |
-| 制作日志 | [EN 摘要](docs/DEV_LOG.en.md) | [正文 JA](docs/DEV_LOG.md) | [ZH 摘要](docs/DEV_LOG.zh.md) |
+| 设计决策 | [DECISIONS](docs/DECISIONS.md) | — | — |
+| 市场定位 | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
 | docs 目录 | [docs/README.md](docs/README.md) | | |
 
 ## 品牌与字体
 - Logo 角色：[docs/BRAND.zh.md](docs/BRAND.zh.md)（主图标=03 / 休闲=01 / 生成等待花=02）
-- 标题字体：**Cinzel**（仅 `.brand-title`）— [docs/FONT_CANDIDATES.zh.md](docs/FONT_CANDIDATES.zh.md)
+- 标题字体：**Cinzel**（仅 `.brand-title`）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
 ## 隐私
-默认按 **Private** 仓库使用。不要提交 `.env`、`data/projects/` 或个人媒体（见 `.gitignore`）。
+发布前保持 **Private** 仓库。开发日记与计划笔记不放在仓库里，而是放在被 gitignore 的
+`private/` 目录。不要提交 `.env`、导入的音源，或任何包含本机绝对路径的文件（见 `.gitignore`）。
 
 ## 许可
 著作权归作者所有（All rights reserved）。详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。
