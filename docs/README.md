@@ -13,6 +13,7 @@ Product docs ship in three languages. File order convention: **English (default 
 | **Design decisions** | [DECISIONS.md](DECISIONS.md) | — | — |
 | **Positioning / differentiation** | [POSITIONING.md](POSITIONING.md) | [POSITIONING.ja.md](POSITIONING.ja.md) | — |
 | **Craft / Taste (standard edit + personalization layer)** | [CRAFT.md](CRAFT.md) | same file (JA section at top) | — |
+| **Writing segment prompts** | [PROMPTING.md](PROMPTING.md) | — | — |
 | Canva export | [CANVA.md](CANVA.md) | — | — |
 
 ## What is not here
@@ -28,6 +29,11 @@ an honest list of current limitations. English only — it is a specification, n
 ## Note on POSITIONING
 Market map and differentiation vs Freebeat, Neural Frames, local MV pipelines, etc.  
 Update when a new neighbor appears or the same “isn’t this just …?” question repeats.
+
+## Note on PROMPTING
+How to write a segment prompt that survives a 5-second clip, and what `compose_video_prompt`
+appends on your behalf. Its companion `theory/prompt_vocab_v0.json` is a camera / lighting /
+style vocabulary with JA · ZH labels, kept for the prompt-editor chips that do not exist yet.
 
 ## Note on CRAFT
 Craft is **standard product capability** (mode, structured Unmatch, taste memory, partial regen), not a private side fork.  
