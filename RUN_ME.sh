@@ -33,7 +33,7 @@ if [[ "${VIDEO_PROVIDER}" == "fal" ]]; then
   echo "FAL_VIDEO_MODEL=${FAL_VIDEO_MODEL:-fal-ai/minimax-video}"
 fi
 if [[ "${VIDEO_PROVIDER}" == "xai" || "${VIDEO_PROVIDER}" == "grok" ]]; then
-  echo "xAI / Grok Imagine: Ben's Tool OAuth (~/.bentool) or XAI_API_KEY"
+  echo "xAI / Grok Imagine: XAI_API_KEY, or XAI_OAUTH_HELPER / XAI_TOKEN_STORE"
   echo "XAI_VIDEO_MODEL=${XAI_VIDEO_MODEL:-grok-imagine-video}"
 fi
 

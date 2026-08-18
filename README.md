@@ -44,7 +44,7 @@ Top-right ⚙ — Japanese / English / Chinese (`mfw.lang`)
 
 ```bash
 cp .env.example .env
-# VIDEO_PROVIDER=xai   # recommended (Ben's Tool SuperGrok OAuth)
+# VIDEO_PROVIDER=xai   # Grok Imagine (needs XAI_API_KEY)
 # VIDEO_PROVIDER=fal   # optional
 # VIDEO_PROVIDER=mock  # no API
 ./RUN_ME.sh

@@ -130,7 +130,7 @@ nav ok — load_html shell
 - **Dark UI but dead clicks / no resize:** if log has `setContentView_(WKWebView)` → old Incident G/H patch; use stock pywebview only.
 - **Port clash:** set `PORT=` in `.env`, or free 8787
 - **No pywebview:** `.venv/bin/pip install pywebview`
-- **Ben's Tool PYTHONPATH pollution:** desktop_app strips `/.bentool/` from `sys.path`
+- **Foreign PYTHONPATH pollution:** desktop_app drops dotted `$HOME` directories from `sys.path`; add more substrings with `XOCHIPILLI_PATH_DENY`
 - **Browser only when you want it:** `XOCHIPILLI_SHELL=browser` (never default from Dock)
 - **New project / import do nothing (`Auth token is stale`):** the window holds a different
   token than the server. Quit and relaunch. The token lives in

@@ -8,28 +8,32 @@
 |------------------|------|------|
 | **`mock`**（既定） | 不要 | ローカル仮映像 |
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
-| **`xai`**（別名 `grok`） | **SuperGrok OAuth（Ben's Tool）** または `XAI_API_KEY` | Grok Imagine Video |
+| **`xai`**（別名 `grok`） | `XAI_API_KEY`、または既存の OAuth セッション | Grok Imagine Video |
 
 **本物プロバイダ**では失敗は **エラー**として返す（成功した成片のふりをしない）。mock は `VIDEO_PROVIDER=mock` のときだけ。
 
+鍵は各自が用意する。他人のアカウントを経由することはない。
+
 ---
 
-## 推奨: SuperGrok → OAuth（Grok 映像）
-
-Ben's Tool が `provider: xai-oauth` / `video_gen.provider: xai` 済みなら、  
-ショチピリは **同じ OAuth トークン**を使う（別途 API キーを買わなくてよい）。
+## 自分の鍵で Grok 映像を使う
 
 ### 手順
 
-1. Ben's Tool 側で xAI にログインできていること  
-   - Desktop の xAI / SuperGrok ログイン  
-   - または CLI: `bentool auth`（xai-oauth）  
-   - `~/.bentool/auth.json` に `providers.xai-oauth.tokens` がある
+1. xAI の API キーを取得し、プロジェクトの `.env` に `XAI_API_KEY` として入れる。
+
+   他のツールで取得済みの xAI OAuth セッションがあるなら、鍵を買わずにそれを使い回せる。
+   どちらも任意で、既定では無効：
+
+   - `XAI_OAUTH_HELPER` — `tools/xai_http.py` の `resolve_xai_http_credentials()`
+     を持つディレクトリ。こちらはトークンを更新する。
+   - `XAI_TOKEN_STORE` — OAuth アクセストークンを含む JSON ファイル。
+     `providers.xai-oauth.tokens.access_token` を読む。更新はしないので期限切れになりうる。
 
 2. プロジェクト `.env`:
 
 ```bash
-cd /path/to/music-film-workbench
+cd /path/to/xochipilli
 cp .env.example .env
 ```
 
@@ -59,7 +63,7 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 期待:
 - `video_provider`: `"xai"`
 - `xai_auth.ok`: `true`
-- `xai_auth.source`: `bentool-oauth` など
+- `xai_auth.source`: `xai_api_key`、helper 設定時は `oauth-helper` など
 
 5. UI で区間プロンプト → 生成。  
    1本 **数十秒〜数分**かかることがある。長い区間は約5秒単位に分割し、可能なら native Extension、だめなら末フレーム I2V でつなぐ。
@@ -67,13 +71,14 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 ### OAuth が切れているとき
 
 health の `xai_auth.relogin_hint` や note に auth エラーが出る。  
-**Ben's Tool で xAI 再ログイン**してから `./RUN_ME.sh`。
+セッションを管理している側で xAI に再ログインしてから `./RUN_ME.sh`。  
+`XAI_API_KEY` を使っている場合はこの形で期限切れにならない。
 
 ### 認証の優先順（コード）
 
-1. Ben's Tool `resolve_xai_http_credentials`（リフレッシュ込み）  
+1. `XAI_OAUTH_HELPER` の `resolve_xai_http_credentials()`（リフレッシュ込み・設定時のみ）  
 2. `XAI_API_KEY`  
-3. `auth.json` の生 `access_token`（最終手段・期限切れやすい）
+3. `XAI_TOKEN_STORE` の生 `access_token`（最終手段・期限切れやすい）
 
 ---
 

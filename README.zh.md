@@ -44,7 +44,7 @@ Space 播放 · R 曲首 · **P** 打点 · **K** 框起点 · **L** 循环 · *
 
 ```bash
 cp .env.example .env
-# VIDEO_PROVIDER=xai   # 推荐（Ben's Tool SuperGrok OAuth）
+# VIDEO_PROVIDER=xai   # Grok Imagine（需要 XAI_API_KEY）
 # VIDEO_PROVIDER=fal   # 可选
 # VIDEO_PROVIDER=mock  # 无需 API
 ./RUN_ME.sh

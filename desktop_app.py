@@ -52,13 +52,39 @@ for _stream_name in ("stdout", "stderr"):
 
 os.environ.pop("PYTHONPATH", None)
 os.environ.pop("PYTHONHOME", None)
+# Other tools' Python environments leak in through the Dock launcher and shadow
+# our packages. They normally live in a dotted directory under $HOME, so drop
+# any sys.path entry like that unless it belongs to this project. Extra
+# substrings to drop can be given in XOCHIPILLI_PATH_DENY, os.pathsep separated.
+_home_dir = str(Path.home()).replace("\\", "/")
+# Always keep this project and whatever interpreter is running us. The stdlib can
+# itself sit under a dotted directory in $HOME (uv- and pyenv-managed builds do),
+# so these prefixes must be checked before the rule below.
+_keep_prefixes = tuple(
+    _s.replace("\\", "/")
+    for _s in (
+        str(Path(__file__).resolve().parent),
+        sys.prefix,
+        sys.base_prefix,
+    )
+    if _s
+)
+_path_deny = [
+    _d for _d in (os.environ.get("XOCHIPILLI_PATH_DENY") or "").split(os.pathsep) if _d
+]
 _clean_path: list[str] = []
 for _p in sys.path:
     if not _p:
         _clean_path.append(_p)
         continue
-    low = _p.replace("\\", "/").lower()
-    if "/.bentool/" in low or "bentool-agent" in low:
+    _norm = _p.replace("\\", "/")
+    if _norm.startswith(_keep_prefixes):
+        _clean_path.append(_p)
+        continue
+    if any(_d in _norm for _d in _path_deny):
+        continue
+    _under_home = _norm[len(_home_dir) :] if _norm.startswith(_home_dir) else ""
+    if any(_seg.startswith(".") for _seg in _under_home.split("/") if _seg):
         continue
     _clean_path.append(_p)
 sys.path[:] = _clean_path

@@ -8,28 +8,32 @@
 |------------------|------|-------|
 | **`mock`** (default) | none | Local placeholder video |
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
-| **`xai`** (alias `grok`) | **SuperGrok OAuth (Ben's Tool)** or `XAI_API_KEY` | Grok Imagine Video |
+| **`xai`** (alias `grok`) | `XAI_API_KEY`, or an existing OAuth session | Grok Imagine Video |
 
 Under a **real** provider, failures **raise an error** (they are not silently sold as successful takes). Mock is only used when `VIDEO_PROVIDER=mock`.
 
+You bring your own credentials. Nothing is proxied through anyone else's account.
+
 ---
 
-## Recommended: SuperGrok → OAuth (Grok video)
-
-If Ben's Tool is already on `provider: xai-oauth` / `video_gen.provider: xai`,  
-Xochipilli reuses **the same OAuth token** (no separate paid API key required).
+## Grok video with your own key
 
 ### Steps
 
-1. Be logged into xAI on the Ben's Tool side  
-   - Desktop xAI / SuperGrok login  
-   - or CLI: `bentool auth` (xai-oauth)  
-   - `~/.bentool/auth.json` should contain `providers.xai-oauth.tokens`
+1. Get an xAI API key and put it in the project `.env` as `XAI_API_KEY`.
+
+   If you already hold an xAI OAuth session from another tool, you can reuse it
+   instead of buying a key. Both routes are opt-in and off by default:
+
+   - `XAI_OAUTH_HELPER` — a directory exposing `tools/xai_http.py` with
+     `resolve_xai_http_credentials()`. This route refreshes tokens.
+   - `XAI_TOKEN_STORE` — a JSON file holding an OAuth access token, read at
+     `providers.xai-oauth.tokens.access_token`. No refresh, so it can go stale.
 
 2. Project `.env`:
 
 ```bash
-cd /path/to/music-film-workbench
+cd /path/to/xochipilli
 cp .env.example .env
 ```
 
@@ -59,7 +63,7 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 Expect:
 - `video_provider`: `"xai"`
 - `xai_auth.ok`: `true`
-- `xai_auth.source`: e.g. `bentool-oauth`
+- `xai_auth.source`: e.g. `xai_api_key`, or `oauth-helper` when a helper is configured
 
 5. In the UI: segment prompt → Generate.  
    One clip may take **tens of seconds to a few minutes**.
@@ -87,13 +91,14 @@ Health exposes limits under `xai_duration` (`split_policy: unit_5s_default`).
 ### When OAuth expires
 
 `xai_auth.relogin_hint` on health, or an auth error in the segment note.  
-**Re-login to xAI in Ben's Tool**, then `./RUN_ME.sh`.
+Re-login to xAI wherever the session is managed, then `./RUN_ME.sh`. A plain
+`XAI_API_KEY` does not expire this way.
 
 ### Auth priority (code)
 
-1. Ben's Tool `resolve_xai_http_credentials` (with refresh)  
+1. `XAI_OAUTH_HELPER` → `resolve_xai_http_credentials()` (with refresh), if configured  
 2. `XAI_API_KEY`  
-3. Raw `access_token` in `auth.json` (last resort; expires easily)
+3. Raw `access_token` from `XAI_TOKEN_STORE` (last resort; expires easily)
 
 ---
 

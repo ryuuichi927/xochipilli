@@ -44,7 +44,7 @@ Space 再生 · R 曲頭 · **P** ピン · **K** 枠の頭 · **L** ループ �
 
 ```bash
 cp .env.example .env
-# VIDEO_PROVIDER=xai   # 推奨（Ben's Tool SuperGrok OAuth）
+# VIDEO_PROVIDER=xai   # Grok Imagine（XAI_API_KEY が必要）
 # VIDEO_PROVIDER=fal   # 任意
 # VIDEO_PROVIDER=mock  # API 不要
 ./RUN_ME.sh

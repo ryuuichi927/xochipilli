@@ -8,28 +8,32 @@
 |------------------|------|------|
 | **`mock`**（默认） | 无 | 本地占位影像 |
 | **`fal`** | `FAL_KEY` | FAL text-to-video |
-| **`xai`**（别名 `grok`） | **SuperGrok OAuth（Ben's Tool）** 或 `XAI_API_KEY` | Grok Imagine Video |
+| **`xai`**（别名 `grok`） | `XAI_API_KEY`，或已有的 OAuth 会话 | Grok Imagine Video |
 
 在 **真实提供方** 下，失败会 **直接报错**（不会悄悄当成成功成片）。只有 `VIDEO_PROVIDER=mock` 时才使用 mock。
 
+密钥由使用者自备，不经由他人账户代理。
+
 ---
 
-## 推荐：SuperGrok → OAuth（Grok 影像）
-
-若 Ben's Tool 已配置 `provider: xai-oauth` / `video_gen.provider: xai`，  
-Xochipilli 会复用 **同一 OAuth 令牌**（不必另购 API 密钥）。
+## 用自己的密钥调用 Grok 影像
 
 ### 步骤
 
-1. 在 Ben's Tool 侧完成 xAI 登录  
-   - Desktop 的 xAI / SuperGrok 登录  
-   - 或 CLI：`bentool auth`（xai-oauth）  
-   - `~/.bentool/auth.json` 中有 `providers.xai-oauth.tokens`
+1. 取得 xAI 的 API 密钥，写入项目 `.env` 的 `XAI_API_KEY`。
+
+   若已在其他工具中持有 xAI 的 OAuth 会话，可以复用而无需另购密钥。
+   两条路径均为可选，默认关闭：
+
+   - `XAI_OAUTH_HELPER` — 提供 `tools/xai_http.py` 中
+     `resolve_xai_http_credentials()` 的目录。此路径会刷新令牌。
+   - `XAI_TOKEN_STORE` — 含 OAuth 访问令牌的 JSON 文件，读取
+     `providers.xai-oauth.tokens.access_token`。不刷新，可能过期。
 
 2. 项目 `.env`：
 
 ```bash
-cd /path/to/music-film-workbench
+cd /path/to/xochipilli
 cp .env.example .env
 ```
 
@@ -59,7 +63,7 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 期望：
 - `video_provider`: `"xai"`
 - `xai_auth.ok`: `true`
-- `xai_auth.source`: 如 `bentool-oauth`
+- `xai_auth.source`: 如 `xai_api_key`，配置 helper 时为 `oauth-helper`
 
 5. 在 UI 写区间提示词 → 生成。  
    一条可能需要 **数十秒到数分钟**。长区间会按约 5 秒切分并衔接（优先 native Extension，否则末帧 I2V）。
@@ -67,13 +71,14 @@ curl -s http://127.0.0.1:8787/api/health | python3 -m json.tool
 ### OAuth 失效时
 
 health 的 `xai_auth.relogin_hint` 或 note 中的 auth 错误。  
-在 **Ben's Tool 重新登录 xAI**，再 `./RUN_ME.sh`。
+在管理该会话的一侧重新登录 xAI，再 `./RUN_ME.sh`。  
+使用 `XAI_API_KEY` 时不会以这种方式过期。
 
 ### 认证优先级（代码）
 
-1. Ben's Tool `resolve_xai_http_credentials`（含刷新）  
+1. `XAI_OAUTH_HELPER` 的 `resolve_xai_http_credentials()`（含刷新，仅在配置时）  
 2. `XAI_API_KEY`  
-3. `auth.json` 中的原始 `access_token`（最后手段，易过期）
+3. `XAI_TOKEN_STORE` 中的原始 `access_token`（最后手段，易过期）
 
 ---
 
