@@ -159,10 +159,6 @@ JSON に無い clips は孤児（古いテイク）なので、必要なら GC �
 - ロゴ役割: [docs/BRAND.ja.md](docs/BRAND.ja.md)（本アイコン=03 / カジュアル=01 / 生成待ち花=02）
 - ヘッダー字体: **Cinzel**（`.brand-title` のみ）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
-## 個人メモの扱い
-作業日記・事故記録・計画メモはこのリポジトリに置いていない。`.env`・導入した音源・自分の
-マシンの絶対パスを含むものはコミットしない（`.gitignore` 参照）。
-
 ## ライセンス
 著作権は作者に帰属します（All rights reserved）。
 使用・複製・再配布の許諾は与えていません。

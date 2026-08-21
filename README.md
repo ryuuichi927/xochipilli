@@ -161,10 +161,6 @@ are orphans from older takes and may be collected.
 | Brand marks | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
 | Index | [docs/README.md](docs/README.md) | | |
 
-Personal working notes — the build diary, incident write-ups, and planning documents — are
-kept out of this repository entirely. Do not commit `.env`, imported media, or anything
-holding an absolute path to your own machine (see `.gitignore`).
-
 ## License
 
 Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**

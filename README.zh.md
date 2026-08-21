@@ -158,10 +158,6 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 - Logo 角色：[docs/BRAND.zh.md](docs/BRAND.zh.md)（主图标=03 / 休闲=01 / 生成等待花=02）
 - 标题字体：**Cinzel**（仅 `.brand-title`）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
-## 个人笔记的处理
-开发日记、事故记录与计划笔记都不放在本仓库中。不要提交 `.env`、导入的音源，或任何包含本机
-绝对路径的文件（见 `.gitignore`）。
-
 ## 许可
 著作权归作者所有（All rights reserved）。
 不授予使用、复制或再分发的许可。

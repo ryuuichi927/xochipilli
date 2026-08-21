@@ -37,6 +37,5 @@ clip, and what `compose_video_prompt` appends on your behalf. Its companion
 `theory/prompt_vocab_v0.json` holds a camera, lighting and style vocabulary with JA and ZH
 labels, waiting on prompt-editor chips that don’t exist yet.
 
-The build diary, incident write-ups, planning notes and the typeface shortlist aren’t in the
-repository. They are working documents. Anything in them worth publishing gets rewritten into
+Working notes stay out of the repository. Anything in them worth keeping gets rewritten into
 DECISIONS by hand.
