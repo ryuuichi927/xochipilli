@@ -10,6 +10,21 @@
 
 设计：**龙一 · Ryuichi Hamakawa**
 
+## 导入曲目
+
+刚导入的曲子除了波形之外什么都没有。
+
+![刚导入、尚未分析：只有波形](docs/media/digest-before.png)
+
+消化（digest）会读这首曲子，并**提出**区间候选 — 下图金色的色块，这里是 21 条，来自
+librosa 的 novelty 检测。此时什么都还没定：控件是一个叫 **Apply section drafts** 的按钮，
+作者可以采用、替换，也可以完全忽略、自己打点。
+
+![消化之后：波形上叠着区间候选](docs/media/digest-after.png)
+
+这个区分就是整个设计。分析给线索，切分由人来做。详见
+[DECISIONS.md](docs/DECISIONS.md)。
+
 ## 当前状态
 
 **开发中 — `0.1.0-d1`，stage D1。** 2026 年 8 月开始，仍在持续开发。它能跑，作者也在用它做

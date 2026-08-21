@@ -11,6 +11,22 @@ Named after **Xochipilli**, the Aztec deity associated with song, dance, and art
 
 By **Ryuichi Hamakawa**.
 
+## Importing a track
+
+An imported track is a waveform and nothing else.
+
+![An imported track before analysis: waveform only](docs/media/digest-before.png)
+
+Analysis ("digest") reads the track and *proposes* sections — the gold blocks below, 21 of
+them here, from librosa novelty detection. Nothing has been decided at this point: the
+control is a button labelled **Apply section drafts**, and the author is free to apply them,
+replace them, or ignore them and pin the intervals by hand.
+
+![The same track after analysis, with proposed section drafts over the waveform](docs/media/digest-after.png)
+
+That distinction is the whole design. Analysis produces hints; the author produces cuts.
+See [DECISIONS.md](docs/DECISIONS.md).
+
 ## Status
 
 **Work in progress — `0.1.0-d1`, stage D1.** Started August 2026 and under active
