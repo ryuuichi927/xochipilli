@@ -2,10 +2,34 @@
 
 [English](README.md) | **日本語** | [中文](README.zh.md)
 
-ローカル PC で動く 音楽→映像作業台。  
-名前はアステカ神話の **Xochipilli（花の王子）** 
+手作業を前提にした、ローカルで動く 音楽→映像の作業台。曲がタイムラインで、要る区間を人が
+ピンで切り、区間ごとに演出を書き、テイクは自分のディスクに残る。
+
+「曲を入れたら MV が出てくる」ボタンは無い。付けたら別の道具になる。
+名前はアステカ神話の **Xochipilli（花の王子）** — 歌・踊り・芸術の神。
 
 設計: **龍一 · Ryuichi Hamakawa**
+
+## 現状
+
+**開発中 — `0.1.0-d1`、stage D1。** 2026年8月開始、いまも作業中。動くし作者は実作業に使って
+いるが、他人向けに包装されていない。準備は開発者向け（Python 仮想環境・`ffmpeg`・自分の API
+キー）で、連鎖クリップの継ぎ目はまだプロの一発の水準に届かない。
+
+足りていない点は [DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations) に
+正直に並べてある。
+
+公開しているのは、設計とその理由を読めるようにするためで、完成したからではない。
+
+## 先に読むべきもの
+
+動かすより中身を知りたい場合、要点はこの3つ。
+
+| 文書 | 内容 |
+|------|------|
+| [DECISIONS.md](docs/DECISIONS.md) | 実装済みの判断、その理由、試して捨てた道、現在の限界 |
+| [POSITIONING.md](docs/POSITIONING.ja.md) | 近隣ツールの調査と、どこも出していない組み合わせ |
+| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | 作者の聴取研究が設計のどこに入り、どこで意図的に拒否されたか |
 
 ## 起動
 
@@ -38,7 +62,7 @@ Space 再生 · R 曲頭 · **P** ピン · **K** 枠の頭 · **L** ループ �
 ## 言語
 右上 ⚙ — 日 / 英 / 中（`mfw.lang`）
 
-## 映像 API（自分のキー / SuperGrok OAuth）
+## 映像 API（キーは自分のものを使う）
 
 **手順の正本:** [docs/VIDEO_API.ja.md](docs/VIDEO_API.ja.md) · [EN](docs/VIDEO_API.md) · [ZH](docs/VIDEO_API.zh.md)
 
@@ -93,16 +117,20 @@ JSON に無い clips は孤児（古いテイク）なので、必要なら GC �
 | ブランド | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
 | 設計判断 | [DECISIONS](docs/DECISIONS.md) | — | — |
 | ポジション | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
+| 研究文脈 | [RESEARCH-CONTEXT](docs/RESEARCH-CONTEXT.md) | — | — |
+| Craft / taste 層 | [CRAFT](docs/CRAFT.md) | — | — |
+| プロンプトの書き方 | [PROMPTING](docs/PROMPTING.md) | — | — |
 | docs 目次 | [docs/README.md](docs/README.md) | | |
 
 ## ブランド・字体
 - ロゴ役割: [docs/BRAND.ja.md](docs/BRAND.ja.md)（本アイコン=03 / カジュアル=01 / 生成待ち花=02）
 - ヘッダー字体: **Cinzel**（`.brand-title` のみ）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
-## プライバシー
-公開前なので **Private** リポジトリ。作業日記や計画メモはリポジトリに置かず、gitignore した
-`private/` に分けている。`.env`・導入した音源・自分のマシンの絶対パスを含むものはコミットしない
-（`.gitignore` 参照）。
+## 個人メモの扱い
+作業日記・事故記録・計画メモはこのリポジトリに置いていない。`.env`・導入した音源・自分の
+マシンの絶対パスを含むものはコミットしない（`.gitignore` 参照）。
 
 ## ライセンス
-著作権は作者に帰属します（All rights reserved）。詳細は [LICENSE](./LICENSE)（日本語 / English / 中文）。
+著作権は作者に帰属します（All rights reserved）。
+閲覧と評価のために公開しているもので、使用・複製・再配布の許諾は与えていません。
+詳細は [LICENSE](./LICENSE)（日本語 / English / 中文）。

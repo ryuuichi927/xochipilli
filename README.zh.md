@@ -2,10 +2,34 @@
 
 [English](README.md) | [日本語](README.ja.md) | **中文**
 
-运行在本地电脑上的 音乐→影像工作台。  
-名称来自阿兹特克神话中的 **Xochipilli（花之王子）
+以手工为前提、运行在本地电脑上的 音乐→影像工作台。曲子就是时间线：由人打点切出要用的
+区间，逐段写下调度，成片留在自己的磁盘上。
+
+没有「丢进一首歌就吐出 MV」的按钮；加上它就是另一个产品了。
+名称来自阿兹特克神话中的 **Xochipilli（花之王子）** — 歌、舞与艺术之神。
 
 设计：**龙一 · Ryuichi Hamakawa**
+
+## 当前状态
+
+**开发中 — `0.1.0-d1`，stage D1。** 2026 年 8 月开始，仍在持续开发。它能跑，作者也在用它做
+实际工作，但尚未为他人打包。安装是开发者流程（Python 虚拟环境、`ffmpeg`、自备 API 密钥），
+连接片段之间的接缝还达不到专业一条过的水准。
+
+不足之处诚实地列在
+[DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations)。
+
+公开的目的是让设计与理由可以被阅读，而不是因为软件已经完成。
+
+## 建议先读
+
+如果目的是了解这个项目而不是运行它，要点是这三份。
+
+| 文档 | 内容 |
+|------|------|
+| [DECISIONS.md](docs/DECISIONS.md) | 已落地的每个决定、理由、试过又放弃的路线，以及当前的局限 |
+| [POSITIONING.md](docs/POSITIONING.md) | 邻近工具的调研，以及没有任何一家做出的那个组合 |
+| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | 作者的日常聆听研究影响了设计的哪一处，以及在哪里被刻意拒绝 |
 
 ## 启动
 
@@ -38,7 +62,7 @@ Space 播放 · R 曲首 · **P** 打点 · **K** 框起点 · **L** 循环 · *
 ## 界面语言
 右上角 ⚙ — 日 / 英 / 中（`mfw.lang`）
 
-## 影像 API（自有密钥 / SuperGrok OAuth）
+## 影像 API（使用自备密钥）
 
 **步骤说明：** [docs/VIDEO_API.zh.md](docs/VIDEO_API.zh.md) · [EN](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md)
 
@@ -93,15 +117,20 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 | 品牌 | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
 | 设计决策 | [DECISIONS](docs/DECISIONS.md) | — | — |
 | 市场定位 | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
+| 研究背景 | [RESEARCH-CONTEXT](docs/RESEARCH-CONTEXT.md) | — | — |
+| Craft / taste 层 | [CRAFT](docs/CRAFT.md) | — | — |
+| 提示词写法 | [PROMPTING](docs/PROMPTING.md) | — | — |
 | docs 目录 | [docs/README.md](docs/README.md) | | |
 
 ## 品牌与字体
 - Logo 角色：[docs/BRAND.zh.md](docs/BRAND.zh.md)（主图标=03 / 休闲=01 / 生成等待花=02）
 - 标题字体：**Cinzel**（仅 `.brand-title`）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
-## 隐私
-发布前保持 **Private** 仓库。开发日记与计划笔记不放在仓库里，而是放在被 gitignore 的
-`private/` 目录。不要提交 `.env`、导入的音源，或任何包含本机绝对路径的文件（见 `.gitignore`）。
+## 个人笔记的处理
+开发日记、事故记录与计划笔记都不放在本仓库中。不要提交 `.env`、导入的音源，或任何包含本机
+绝对路径的文件（见 `.gitignore`）。
 
 ## 许可
-著作权归作者所有（All rights reserved）。详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。
+著作权归作者所有（All rights reserved）。
+公开仅供阅读与评估，不授予使用、复制或再分发的许可。
+详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。

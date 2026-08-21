@@ -2,55 +2,83 @@
 
 **English** | [日本語](README.ja.md) | [中文](README.zh.md)
 
-Local, **Manual-oriented** music → film workbench for your Mac.  
-The name comes from the Aztec deity **Xochipilli** 
+A local, manual-first workbench for turning a piece of music into film, one authored segment
+at a time. It runs on your own Mac: the song is the timeline, you pin the intervals that
+matter, you write the direction for each one, and the takes stay on your disk.
 
-Designed by **Ryuichi Hamakawa**.
+There is no "make me a music video" button, and adding one would make it a different tool.
+Named after **Xochipilli**, the Aztec deity associated with song, dance, and art.
 
-## Launch
+By **Ryuichi Hamakawa**.
 
-### Desktop window (recommended)
+## Status
+
+**Work in progress — `0.1.0-d1`, stage D1.** Started August 2026 and under active
+development. It runs, and it is used for real work by its author; it is not packaged for
+other people yet. Setup is a developer setup (Python virtualenv, `ffmpeg`, your own API
+key), and the seams between generated clips are not yet at the level of a single
+professional take.
+
+An honest list of what falls short is kept in
+[DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations).
+
+The repository is published so the design and the reasoning can be read, not because the
+software is finished.
+
+## Where to start reading
+
+If you are here to understand the project rather than to run it, these three are the point:
+
+| Document | What it holds |
+|----------|---------------|
+| [DECISIONS.md](docs/DECISIONS.md) | Every choice that shipped, why, what was tried and rejected, and where it currently falls short |
+| [POSITIONING.md](docs/POSITIONING.md) | Survey of neighboring tools and the specific combination none of them shipped |
+| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | How the author's research on everyday listening shaped one part of the design — and where the framework was deliberately refused |
+
+## How the work goes
+
+1. **Import a track (digest)** — builds analysis audio; re-importing resets segments and clips
+2. Play and seek. Click a segment frame to edit. **Pin with `P`** at the playhead
+3. Write a **video prompt** per segment. Machine-suggested emotion keywords are hints, never decisions
+4. Take feels wrong → **Unmatch**, with a reason. Repeated signals bias later prompts
+5. **Generate** — 5-second units, chained, with the overhang tucked under the next segment
+
+Design rationale for each of these is in [DECISIONS.md](docs/DECISIONS.md).
+
+## Run it
+
+Requires macOS, Python 3, and `ffmpeg`.
+
+### Desktop window
 ```bash
 cd /path/to/xochipilli
-./RUN_DESKTOP.sh
-# or Dock / Applications → Xochipilli.app
+./RUN_DESKTOP.sh          # or Xochipilli.app, built by native/build_launcher.sh
 ```
 Details: [docs/DESKTOP.md](docs/DESKTOP.md) · [JA](docs/DESKTOP.ja.md) · [ZH](docs/DESKTOP.zh.md)
 
 ### Browser only
 ```bash
-./RUN_ME.sh
+./RUN_ME.sh               # then open http://127.0.0.1:8787
 ```
-Open http://127.0.0.1:8787
 
-## Quick workflow
-1. **Import a track (digest)** — builds analysis audio (re-import resets segments and clips)
-2. Play / seek. Click a segment frame to edit. **Pin with P** (playhead)
-3. Write a **video prompt** per segment. AI emotion keywords are hints only
-4. Feels wrong → **Unmatch**
-5. **Generate video** — set `VIDEO_PROVIDER` in `.env` (default: `mock`)
-
-## Keyboard
-**Canonical list:** [docs/KEYS.md](docs/KEYS.md) · [JA](docs/KEYS.ja.md) · [ZH](docs/KEYS.zh.md)
-
-Space play · R to start · **P** pin · **K** frame start · **L** loop · **F** fit · **Tab** · more in KEYS (disabled while typing)
-
-## UI language
-Top-right ⚙ — Japanese / English / Chinese (`mfw.lang`)
-
-## Video API (your keys / SuperGrok OAuth)
-
-**Canonical guide:** [docs/VIDEO_API.md](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md) · [ZH](docs/VIDEO_API.zh.md)
-
+### Generation provider (bring your own key)
 ```bash
 cp .env.example .env
-# VIDEO_PROVIDER=xai   # Grok Imagine (needs XAI_API_KEY)
-# VIDEO_PROVIDER=fal   # optional
-# VIDEO_PROVIDER=mock  # no API
-./RUN_ME.sh
+# VIDEO_PROVIDER=xai    # Grok Imagine (needs XAI_API_KEY)
+# VIDEO_PROVIDER=fal    # optional
+# VIDEO_PROVIDER=mock   # no API, the default
 ```
 
-Without `.env`, the default is `mock`. Under a real provider (`xai` / `fal`), failures return an error — they are not silently treated as successful takes.
+Without `.env` the provider is `mock`. Under a real provider, a failed generation returns an
+error — it is never quietly replaced by a mock take that looks like success. Full guide:
+[docs/VIDEO_API.md](docs/VIDEO_API.md) · [JA](docs/VIDEO_API.ja.md) · [ZH](docs/VIDEO_API.zh.md)
+
+### Keyboard
+`Space` play · `R` restart · **`P` pin** · `K` frame start · `L` loop · `F` fit · `Tab` ·
+disabled while typing. Canonical list: [docs/KEYS.md](docs/KEYS.md) ·
+[JA](docs/KEYS.ja.md) · [ZH](docs/KEYS.zh.md)
+
+UI language (Japanese / English / Chinese) is the ⚙ menu, top right.
 
 ## Development
 
@@ -74,37 +102,37 @@ touch it. Default root is `~/Documents/Xochipilli`; override with `XOCHIPILLI_DA
 | `<data>/projects/<id>/analysis.wav` | Mono signal for digest |
 | `<data>/projects/<id>/clips/` | Take mp4s, segment audio slices, chain frames, `program.mp4` |
 | `<data>/projects/<id>/refs/` | Per-segment stills (i2v) |
+| `<data>/user/taste.json` | Unmatch history and prompt bias (local only) |
 | iCloud `Xochipilli/Archive/` | Cold projects parked to free local disk (`XOCHIPILLI_COLD_DAYS`) |
-| `theory/` | Digest / mapping theory JSON |
-| `static/` | UI (`app.js`, i18n, style, brand, fonts) |
-| `app/` | FastAPI backend |
-| `docs/` | KEYS, VIDEO_API, BRAND, DESKTOP, DECISIONS, … |
 
-Deletes (project / segment / take) keep **JSON and disk in sync**.  
-Clips missing from JSON are orphans (old takes) and may be GC’d.
+In the repository itself: `app/` FastAPI backend · `static/` UI · `theory/` digest and
+mapping JSON · `docs/` the documents above · `native/` macOS launcher sources.
 
-## Documentation (EN · JA · ZH)
+Deletes (project / segment / take) keep **JSON and disk in sync**. Clips missing from JSON
+are orphans from older takes and may be collected.
+
+## Documentation
 
 | Topic | English | 日本語 | 中文 |
 |-------|---------|--------|------|
 | This README | [README.md](README.md) | [README.ja.md](README.ja.md) | [README.zh.md](README.zh.md) |
+| **Design decisions** | [DECISIONS](docs/DECISIONS.md) | — | — |
+| **Positioning** | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
+| **Research context** | [RESEARCH-CONTEXT](docs/RESEARCH-CONTEXT.md) | — | — |
+| Craft / taste layer | [CRAFT](docs/CRAFT.md) | — | — |
+| Writing segment prompts | [PROMPTING](docs/PROMPTING.md) | — | — |
 | Desktop launch | [DESKTOP](docs/DESKTOP.md) | [DESKTOP.ja](docs/DESKTOP.ja.md) | [DESKTOP.zh](docs/DESKTOP.zh.md) |
 | Keyboard | [KEYS](docs/KEYS.md) | [KEYS.ja](docs/KEYS.ja.md) | [KEYS.zh](docs/KEYS.zh.md) |
 | Video API | [VIDEO_API](docs/VIDEO_API.md) | [VIDEO_API.ja](docs/VIDEO_API.ja.md) | [VIDEO_API.zh](docs/VIDEO_API.zh.md) |
-| Brand | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
-| Design decisions | [DECISIONS](docs/DECISIONS.md) | — | — |
-| Positioning | [POSITIONING](docs/POSITIONING.md) | [POSITIONING.ja](docs/POSITIONING.ja.md) | — |
-| Docs index | [docs/README.md](docs/README.md) | | |
+| Brand marks | [BRAND](docs/BRAND.md) | [BRAND.ja](docs/BRAND.ja.md) | [BRAND.zh](docs/BRAND.zh.md) |
+| Index | [docs/README.md](docs/README.md) | | |
 
-## Brand & type
-- Logo roles: [docs/BRAND.md](docs/BRAND.md) (primary=03 / casual=01 / wait flower=02)
-- Header typeface: **Cinzel** (`.brand-title` only) — [docs/DECISIONS.md](docs/DECISIONS.md)
-
-## Privacy note
-This repo is **private** while the product is pre-release. Personal working notes are kept
-out of it entirely, in a git-ignored `private/` folder. Do not commit `.env`, imported
-media, or anything holding an absolute path to your own machine (see `.gitignore`).
+Personal working notes — the build diary, incident write-ups, and planning documents — are
+kept out of this repository entirely. Do not commit `.env`, imported media, or anything
+holding an absolute path to your own machine (see `.gitignore`).
 
 ## License
-Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**  
+
+Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**
+Published for reading and evaluation; no license to use, copy, or distribute is granted.
 See [LICENSE](./LICENSE) (Japanese / English / 中文).
