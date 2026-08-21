@@ -53,11 +53,9 @@ librosa 的 novelty 检测。它的控件是一个叫 **Apply section drafts** �
 不足之处列在
 [DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations)。
 
-公开是为了让设计与理由可以被读到。软件本身没有完成。
+## 想清楚的部分写在哪里
 
-## 建议先读
-
-想了解这个项目而不是运行它，从这三份开始。
+关于这个问题我理清的东西，大多在下面三份文档里，而不在代码里。
 
 | 文档 | 内容 |
 |------|------|
@@ -166,5 +164,5 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 
 ## 许可
 著作权归作者所有（All rights reserved）。
-公开仅供阅读与评估，不授予使用、复制或再分发的许可。
+不授予使用、复制或再分发的许可。
 详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。

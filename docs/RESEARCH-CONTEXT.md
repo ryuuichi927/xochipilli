@@ -4,9 +4,7 @@ I study everyday listening: whether a stretch of listening gets a person where t
 go, and what it costs them when it doesn't. This file is about the one place that work reached
 into Xochipilli, and the places I kept it out.
 
-The tool is not part of the research. It has no participants, it administers nothing, and the
-only person it records is me. Nothing it stores would support a claim about listeners, and the
-shape of the file would be a poor one for that even if I tried.
+None of it is research. There are no participants, and the only person it records is me.
 
 ## The reason list
 

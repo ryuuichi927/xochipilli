@@ -58,11 +58,10 @@ single professional take.
 What falls short is listed in
 [DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations).
 
-I'm publishing this so the design and the reasoning can be read. The software isn't finished.
+## Where the thinking is written down
 
-## Where to start reading
-
-To understand the project rather than run it, start with these three:
+Most of what I have worked out about this problem is in three documents rather than in the
+code:
 
 | Document | What it holds |
 |----------|---------------|
@@ -169,5 +168,5 @@ holding an absolute path to your own machine (see `.gitignore`).
 ## License
 
 Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**
-Published for reading and evaluation; no license to use, copy, or distribute is granted.
+No license to use, copy, or distribute is granted.
 See [LICENSE](./LICENSE) (Japanese / English / 中文).
