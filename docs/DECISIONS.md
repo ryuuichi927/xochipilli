@@ -50,6 +50,10 @@ for mock.
 succeeded are kept as a partial take instead of being orphaned on disk while the UI shows
 nothing.
 
+**A chain can be repaired part by part.** The parts of a take are numbered in the interface
+and any subset can be regenerated (`regen-subclips`), so one bad second in the middle of a
+four-part segment does not cost the three parts that worked.
+
 **Camera lock and motion direction are separate intents.** Locking the camera improves
 continuity when chaining, but for segments where the movement *is* the direction, a lock
 lowers the ceiling. Hence `mode` (hold / shift / motion) rather than one global setting.
@@ -121,7 +125,6 @@ Honest about where it currently falls short:
   still being tuned.
 - **A distinctive drawing style tends to drift** toward the generic cinematic look that
   general-purpose models pull towards.
-- **Long-chain partial regeneration exists as an API** (`regen-subclips`) but is not yet an
-  obvious operation in the interface.
-- **Cost is invisible.** A long segment means linearly more API calls, with no estimate
-  shown before generating.
+- **The cost estimate counts calls, not money.** The generate button reads `~4 API calls`,
+  which is the honest unit for a bring-your-own-key tool since providers price differently,
+  but it is not the number an author actually budgets in.
