@@ -2,9 +2,9 @@
 
 **English** | [日本語](README.ja.md) | [中文](README.zh.md)
 
-A local, manual-first workbench for turning a piece of music into film, one authored segment
-at a time. It runs on your own Mac: the song is the timeline, you pin the intervals that
-matter, you write the direction for each one, and the takes stay on your disk.
+A local workbench for turning a piece of music into film, a segment at a time. It runs on your
+own Mac. The song is the timeline, you pin the intervals that matter, you write the direction
+for each one, and the takes stay on your disk.
 
 There is no "make me a music video" button, and adding one would make it a different tool.
 Named after **Xochipilli**, the Aztec deity associated with song, dance, and art.
@@ -17,63 +17,58 @@ An imported track is a waveform and nothing else.
 
 ![An imported track before analysis: waveform only](docs/media/digest-before.png)
 
-Analysis ("digest") reads the track and *proposes* sections — the gold blocks below, 21 of
-them here, from librosa novelty detection. Nothing has been decided at this point: the
-control is a button labelled **Apply section drafts**, and the author is free to apply them,
-replace them, or ignore them and pin the intervals by hand.
+Analysis ("digest") reads the track and proposes sections. Those are the gold blocks below, 21
+of them here, from librosa novelty detection. The control for them is a button reading **Apply
+section drafts**, so you can take them, replace them, or leave them alone and pin the intervals
+yourself. Why it stops at proposing is in [DECISIONS.md](docs/DECISIONS.md).
 
 ![The same track after analysis, with proposed section drafts over the waveform](docs/media/digest-after.png)
 
-That distinction is the whole design. Analysis produces hints; the author produces cuts.
-See [DECISIONS.md](docs/DECISIONS.md).
-
 ## Directing one segment
 
-![The segment editor: author's prompt, segment mode, optional feel sliders, takes, and the time-window bundle sent to the model](docs/media/segment.png)
+![The segment editor: the prompt, segment mode, optional feel sliders, two takes, and the time-window bundle sent to the model](docs/media/segment.png)
 
-Most of what this project believes is visible in this one panel.
+The large field is yours, and it is the only thing describing the shot. Above it, the machine's
+contribution is labelled **AI emotion (reference)**: four keywords you can ignore. **Segment
+mode** is `Hold` here, meaning same scene and framing, which is what makes a camera lock safe
+to apply. `Shift` and `Motion` say otherwise. The **Feel** sliders stay unset unless you move
+them.
 
-The large field is the author's, and it is the only thing that describes the shot. Above it,
-the machine's contribution is labelled **AI emotion (reference)** — four keywords, offered
-and ignorable. **Segment mode** is `Hold` here, meaning same scene and framing, which is what
-makes a camera lock safe to apply; `Shift` and `Motion` say otherwise. The **Feel** sliders
-are optional and stay unset unless the author wants them.
+The generate button reads **`Generate another take · ~4 API calls`**. This segment runs 15.4
+seconds and the unit is five, so each take is four chained clips, recorded as `4×5s`. Both
+takes here were generated for the same segment, which is the normal way to work: keep going
+until one of them holds. When a single part of a chain is wrong, **Partial regen** takes the
+numbered parts `0 1 2 3` and redoes only what you select, so a bad second in the middle doesn't
+cost the three that worked.
 
-The generate button reads **`Generate another take · ~4 API calls`**, because this segment is
-15.4 seconds and the unit is five: the take below it records `4×5s`, four chained clips. When
-one of them is wrong, **Partial regen** takes the numbered parts — `0 1 2 3` — and only
-those, so a bad second in the middle does not cost the three that worked.
-
-The last line is what the model actually received:
+The last line shows what the model actually received:
 
 > TIME WINDOW – This is part 1 of 4 of a 15.4-second sequence, covering seconds 0.0–5.0.
 > Depict ONLY the events that belong to this time window. Do not compress …
 
-The song's clock is imposed on the picture, not the other way round.
+The picture has to fit the song's clock, five seconds at a time.
 
 ## Status
 
-**Work in progress — `0.1.0-d1`, stage D1.** Started August 2026 and under active
-development. It runs, and it is used for real work by its author; it is not packaged for
-other people yet. Setup is a developer setup (Python virtualenv, `ffmpeg`, your own API
-key), and the seams between generated clips are not yet at the level of a single
-professional take.
+**Work in progress — `0.1.0-d1`, stage D1.** Started August 2026 and still moving. It runs, and
+I use it for real work, but it isn't packaged for anyone else: setup means a Python virtualenv,
+`ffmpeg` and your own API key. The seams between chained clips don't yet reach the level of a
+single professional take.
 
-An honest list of what falls short is kept in
+What falls short is listed in
 [DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations).
 
-The repository is published so the design and the reasoning can be read, not because the
-software is finished.
+I'm publishing this so the design and the reasoning can be read. The software isn't finished.
 
 ## Where to start reading
 
-If you are here to understand the project rather than to run it, these three are the point:
+To understand the project rather than run it, start with these three:
 
 | Document | What it holds |
 |----------|---------------|
 | [DECISIONS.md](docs/DECISIONS.md) | Every choice that shipped, why, what was tried and rejected, and where it currently falls short |
 | [POSITIONING.md](docs/POSITIONING.md) | Survey of neighboring tools and the specific combination none of them shipped |
-| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | How the author's research on everyday listening shaped one part of the design — and where the framework was deliberately refused |
+| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | The one place my research on everyday listening reached into the design, and the places I kept it out |
 
 ## How the work goes
 

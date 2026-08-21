@@ -16,57 +16,54 @@
 
 ![刚导入、尚未分析：只有波形](docs/media/digest-before.png)
 
-消化（digest）会读这首曲子，并**提出**区间候选 — 下图金色的色块，这里是 21 条，来自
-librosa 的 novelty 检测。此时什么都还没定：控件是一个叫 **Apply section drafts** 的按钮，
-作者可以采用、替换，也可以完全忽略、自己打点。
+消化（digest）会读这首曲子，并提出区间候选。下图金色的色块就是，这里是 21 条，来自
+librosa 的 novelty 检测。它的控件是一个叫 **Apply section drafts** 的按钮，所以可以采用、
+替换，也可以放着不管、自己打点。为什么只到「提出」这一步，见
+[DECISIONS.md](docs/DECISIONS.md)。
 
 ![消化之后：波形上叠着区间候选](docs/media/digest-after.png)
 
-这个区分就是整个设计。分析给线索，切分由人来做。详见
-[DECISIONS.md](docs/DECISIONS.md)。
-
 ## 调度一个区间
 
-![区间编辑器：作者的提示词、区间模式、可选的 Feel、成片，以及发给模型的时间窗](docs/media/segment.png)
+![区间编辑器：提示词、区间模式、可选的 Feel、两条成片，以及发给模型的时间窗](docs/media/segment.png)
 
-这个项目所相信的东西，大半都在这一屏里。
+那个大输入框是自己的，画面只由它来描述。上面机器的贡献被明确标为
+**AI emotion (reference)**：四个词，可以不用。**Segment mode** 这里是 `Hold`，意思是同一
+场景与构图，所以锁定镜头才是安全的。`Shift` 与 `Motion` 说的是相反的事。**Feel** 两条不动
+就一直空着。
 
-那个大输入框属于作者，画面只由它来描述。上面机器的贡献被明确标为
-**AI emotion (reference)** — 四个词，只是给出来，可以不用。**Segment mode** 这里是
-`Hold`，意思是同一场景与构图，所以锁定镜头才是安全的；`Shift` 与 `Motion` 说的是相反的事。
-**Feel** 两条是可选的，作者不动就一直空着。
-
-生成按钮写着 **`Generate another take · ~4 API calls`**，因为这个区间是 15.4 秒而单位是
-5 秒：下面那条成片记录为 `4×5s`，四段相连。其中一段不对时，**Partial regen** 只重做带编号
-的部分 — `0 1 2 3` — 中间的一秒不必让另外三段跟着重来。
+生成按钮写着 **`Generate another take · ~4 API calls`**。这个区间是 15.4 秒而单位是 5 秒，
+所以一条成片是相连的四段，记为 `4×5s`。图里这两条是对同一个区间生成的，一直叠到有一条站得
+住，这就是平常的用法。相连的四段里只有一段不对时，**Partial regen** 只重做从 `0 1 2 3` 里
+选中的部分，中间的一秒不必让另外三段跟着重来。
 
 最后一行是模型真正收到的内容。
 
 > TIME WINDOW – This is part 1 of 4 of a 15.4-second sequence, covering seconds 0.0–5.0.
 > Depict ONLY the events that belong to this time window. Do not compress …
 
-是把曲子的时钟压到画面上，不是反过来。
+是画面去合曲子的时钟，一次五秒。
 
 ## 当前状态
 
-**开发中 — `0.1.0-d1`，stage D1。** 2026 年 8 月开始，仍在持续开发。它能跑，作者也在用它做
-实际工作，但尚未为他人打包。安装是开发者流程（Python 虚拟环境、`ffmpeg`、自备 API 密钥），
-连接片段之间的接缝还达不到专业一条过的水准。
+**开发中 — `0.1.0-d1`，stage D1。** 2026 年 8 月开始，仍在往前走。它能跑，我也在用它做实际
+工作，但没有为别人打包过：装起来需要 Python 虚拟环境、`ffmpeg`，以及自备的 API 密钥。相连
+片段之间的接缝，还达不到专业一条过的水准。
 
-不足之处诚实地列在
+不足之处列在
 [DECISIONS.md § Known limitations](docs/DECISIONS.md#known-limitations)。
 
-公开的目的是让设计与理由可以被阅读，而不是因为软件已经完成。
+公开是为了让设计与理由可以被读到。软件本身没有完成。
 
 ## 建议先读
 
-如果目的是了解这个项目而不是运行它，要点是这三份。
+想了解这个项目而不是运行它，从这三份开始。
 
 | 文档 | 内容 |
 |------|------|
 | [DECISIONS.md](docs/DECISIONS.md) | 已落地的每个决定、理由、试过又放弃的路线，以及当前的局限 |
 | [POSITIONING.md](docs/POSITIONING.md) | 邻近工具的调研，以及没有任何一家做出的那个组合 |
-| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | 作者的日常聆听研究影响了设计的哪一处，以及在哪里被刻意拒绝 |
+| [RESEARCH-CONTEXT.md](docs/RESEARCH-CONTEXT.md) | 我的日常聆听研究进入设计的唯一一处，以及我没让它进去的地方 |
 
 ## 启动
 
