@@ -159,6 +159,10 @@ JSON 中没有的 clips 是孤儿文件（旧成片），需要时可清理。
 - 标题字体：**Cinzel**（仅 `.brand-title`）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
 ## 许可
-著作权归作者所有（All rights reserved）。
-不授予使用、复制或再分发的许可。
+著作权归作者所有（All rights reserved）。不授予对软件的使用、复制或再分发许可。
+
+文档正文（本文件与 `docs/` 下的 Markdown）另依 **CC BY 4.0** 提供，注明出处即可引用与翻译；
+不含截图与品牌图形。`static/fonts/cinzel/` 中的 Cinzel 字体属第三方，依 SIL Open Font
+License 1.1 提供。
+
 详见 [LICENSE](./LICENSE)（日本語 / English / 中文）。

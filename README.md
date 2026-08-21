@@ -164,5 +164,11 @@ are orphans from older takes and may be collected.
 ## License
 
 Copyright (c) 2026 Ryuichi Hamakawa. **All rights reserved.**
-No license to use, copy, or distribute is granted.
+No license to use, copy, or distribute the software is granted.
+
+The documentation text — this file and the Markdown under `docs/` — is also available
+under **CC BY 4.0**, so it can be quoted and translated with attribution. Screenshots and
+brand artwork are not included in that. The Cinzel typeface under `static/fonts/cinzel/`
+is third-party, licensed under the SIL Open Font License 1.1.
+
 See [LICENSE](./LICENSE) (Japanese / English / 中文).

@@ -160,6 +160,11 @@ JSON に無い clips は孤児（古いテイク）なので、必要なら GC �
 - ヘッダー字体: **Cinzel**（`.brand-title` のみ）— [docs/DECISIONS.md](docs/DECISIONS.md)
 
 ## ライセンス
-著作権は作者に帰属します（All rights reserved）。
-使用・複製・再配布の許諾は与えていません。
+著作権は作者に帰属します（All rights reserved）。ソフトウェアの使用・複製・再配布の許諾は
+与えていません。
+
+ドキュメントの本文（このファイルと `docs/` 以下の Markdown）は **CC BY 4.0** でも利用でき、
+出典を示せば引用・翻訳ができます。スクリーンショットとブランド図案は含みません。
+`static/fonts/cinzel/` の書体 Cinzel は第三者のもので、SIL Open Font License 1.1 です。
+
 詳細は [LICENSE](./LICENSE)（日本語 / English / 中文）。

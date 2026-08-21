@@ -23,6 +23,29 @@ All rights reserved.
 本ソフトウェアは現状有姿で提供され、作者は明示・黙示を問わず
 いかなる保証も行いません。
 
+ドキュメントについて
+
+README.md・README.ja.md・README.zh.md および docs/ 以下の Markdown の本文は、
+上記に加えて Creative Commons 表示 4.0 国際（CC BY 4.0）でも利用できます。
+出典を示せば、引用・翻訳・二次利用ができます。対象は本文だけで、
+スクリーンショット・ブランド図案・同梱フォントは含みません。
+ソフトウェア本体は上記の条件のままです。
+
+第三者のコンポーネントについて
+
+このリポジトリの中身すべてが作者のものではなく、作者のものでない部分に
+上記の条件は及びません。
+
+static/fonts/cinzel/ には書体 Cinzel が入っています。著作権は
+2020 The Cinzel Project Authors にあり、SIL Open Font License 1.1 で
+提供されています。ライセンス本文は static/fonts/cinzel/OFL.txt に置いてあり、
+それらのファイルを規律します。このフォントは OFL のもとで再配布され、
+他のライセンスの下には置かれません。
+
+Python の依存パッケージは requirements.txt に宣言してあり、ここには同梱して
+いません。それぞれ自身のライセンスに従います。ffmpeg は別プログラムとして
+呼び出すだけで、同梱していません。
+
 ────────────────────────────────
 English
 ────────────────────────────────
@@ -45,6 +68,28 @@ For a license, joint development, or a change of terms, contact the author.
 THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED.
 
+Documentation
+
+The text of README.md, README.ja.md, README.zh.md and the Markdown files under
+docs/ is additionally available under the Creative Commons Attribution 4.0
+International licence (CC BY 4.0). Quote it, translate it, build on it, with
+attribution. This covers the text only — screenshots, brand artwork and bundled
+fonts are excluded, and the software itself stays under the terms above.
+
+Third-party components
+
+Not everything in this repository belongs to the author, and the terms above do
+not reach what does not.
+
+static/fonts/cinzel/ holds the Cinzel typeface, copyright 2020 The Cinzel Project
+Authors, licensed under the SIL Open Font License 1.1. Its licence text sits beside
+it in static/fonts/cinzel/OFL.txt and governs those files. The font is
+redistributed under the OFL and under no other licence.
+
+Python dependencies are declared in requirements.txt and are not distributed here;
+each keeps its own licence. ffmpeg is invoked as a separate program and is not
+included.
+
 ────────────────────────────────
 中文
 ────────────────────────────────
@@ -61,3 +106,20 @@ IMPLIED.
 如需获得使用许可、开展共同开发，或调整许可条款，请联系作者。
 
 本软件按现状提供，作者不作任何明示或默示的保证。
+
+关于文档
+
+README.md、README.ja.md、README.zh.md 以及 docs/ 下 Markdown 的正文，除上述条款外，
+也可依 Creative Commons 署名 4.0 国际（CC BY 4.0）使用：注明出处即可引用、翻译、
+再创作。范围仅限正文，不含截图、品牌图形与随附字体；软件本身仍适用上述条款。
+
+关于第三方组件
+
+本仓库并非全部归作者所有，不属于作者的部分不受上述条款约束。
+
+static/fonts/cinzel/ 内含 Cinzel 字体，著作权归 2020 The Cinzel Project Authors，
+依 SIL Open Font License 1.1 提供。许可证正文位于 static/fonts/cinzel/OFL.txt，
+适用于这些文件。该字体依 OFL 再分发，不置于任何其他许可证之下。
+
+Python 依赖在 requirements.txt 中声明，未随本仓库分发，各自适用其许可证。
+ffmpeg 仅作为独立程序调用，未随本仓库分发。
