@@ -39,21 +39,29 @@ When a take is wrong, the author records *why*. The reasons are a fixed taxonomy
 emotion · world · camera · style · episode · other
 ```
 
+![The Unmatch sheet, with the episode reason selected](media/unmatch.png)
+
 Five of those are craft complaints — the mood is off, the setting is wrong, the camera is
-doing the wrong thing. `episode` is different in kind. It means **the take does not do what
-this stretch of music is for.** The example in [CRAFT.md](CRAFT.md) is deliberately
-mundane:
+doing the wrong thing. `episode` is different in kind, and the interface says so in the one
+line it gets: **wrong kind of engagement, even if the picture is fine.** The take can be
+well made and still fail to do what this stretch of music is for. The note field suggests
+the shape of the judgment rather than a quality rating:
 
-> くつろぎたかったのに煽られた — *I wanted to settle, and it revved me up instead.*
+> e.g. wanted calm, got pushy energy
 
-That is not a complaint about quality. It is a functional mismatch between an intended
-effect and a delivered one, which is exactly the shape of the episode-level judgment the
-research is about. Without that framing the reason list would have stopped at five craft
-categories, and this class of failure would have been filed under `emotion` or `other`,
-where it reads as taste rather than as a mismatch of purpose.
+That is a functional mismatch between an intended effect and a delivered one, which is the
+shape of the episode-level judgment the research is about. Without that framing the reason
+list would have stopped at five craft categories, and this failure would have been filed
+under `emotion` or `other`, where it reads as taste rather than as a mismatch of purpose.
 
 `episode` is counted separately (`episode_mismatch_count`), and `function` / `purpose` are
 normalized onto it so the distinction does not erode through synonyms.
+
+**A note on the label.** `episode` is the internal identifier; authors see **Engagement**
+(EN), **体験の働き** (JA), **体验作用** (ZH). The research word would mean nothing to someone
+directing a shot, so the button is worded for the person using it. That plain-language label
+is *not* the involvement construct from the research, which describes a standing feature of a
+person rather than one rejected take. The overlap in wording is a coincidence of English.
 
 ## Where the framework was deliberately refused
 
