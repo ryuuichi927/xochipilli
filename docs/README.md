@@ -17,30 +17,26 @@ Product docs ship in three languages. File order convention: **English (default 
 | **Writing segment prompts** | [PROMPTING.md](PROMPTING.md) | — | — |
 | Canva export | [CANVA.md](CANVA.md) | — | — |
 
-## What is not here
-The build diary, incident write-ups, planning notes, and the typeface shortlist are
-personal working documents and are not part of this repository. Decisions from that log
-that are worth publishing are rewritten into [DECISIONS.md](DECISIONS.md) by hand.
+## Where to look
 
-## Note on RESEARCH-CONTEXT
-The author studies everyday listening. That background changed exactly one thing in the
-product — the vocabulary for rejecting a take — and this file records both that and the
-places where the framework was deliberately kept out. It is scoped to design influence; it
-is not a research write-up and the tool is not a measurement instrument.
+[DECISIONS.md](DECISIONS.md) is the one to read first. It covers why the product behaves as it
+does, the paths that were tried and dropped, and where it currently falls short. English only.
 
-## Note on DECISIONS
-Why the product behaves as it does, including the paths that were tried and rejected, and
-an honest list of current limitations. English only — it is a specification, not a diary.
+[POSITIONING.md](POSITIONING.md) is the survey of neighbouring tools. Worth updating when a new
+one appears, or when the same “isn’t this just …?” question comes round again.
 
-## Note on POSITIONING
-Market map and differentiation vs Freebeat, Neural Frames, local MV pipelines, etc.  
-Update when a new neighbor appears or the same “isn’t this just …?” question repeats.
+[RESEARCH-CONTEXT.md](RESEARCH-CONTEXT.md) covers the one place my work on everyday listening
+reached into the design, and the places I kept it out.
 
-## Note on PROMPTING
-How to write a segment prompt that survives a 5-second clip, and what `compose_video_prompt`
-appends on your behalf. Its companion `theory/prompt_vocab_v0.json` is a camera / lighting /
-style vocabulary with JA · ZH labels, kept for the prompt-editor chips that do not exist yet.
+[CRAFT.md](CRAFT.md) describes mode, structured Unmatch, taste memory and partial regen. These
+are standard capability rather than a side fork; they load as separate modules (`app.server` on
+top of `app.main`) for engineering clarity only.
 
-## Note on CRAFT
-Craft is **standard product capability** (mode, structured Unmatch, taste memory, partial regen), not a private side fork.  
-Code lives in separate modules for engineering clarity; product-wise it is one Xochipilli with `app.server` loading Craft on top of `app.main`. See [CRAFT.md](CRAFT.md).
+[PROMPTING.md](PROMPTING.md) is about writing a segment prompt that survives a five-second
+clip, and what `compose_video_prompt` appends on your behalf. Its companion
+`theory/prompt_vocab_v0.json` holds a camera, lighting and style vocabulary with JA and ZH
+labels, waiting on prompt-editor chips that don’t exist yet.
+
+The build diary, incident write-ups, planning notes and the typeface shortlist aren’t in the
+repository. They are working documents. Anything in them worth publishing gets rewritten into
+DECISIONS by hand.
