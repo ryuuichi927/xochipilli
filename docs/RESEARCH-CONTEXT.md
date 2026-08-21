@@ -92,6 +92,11 @@ than occasion-level constructs: they can sit on a segment without a category err
 are available per segment and sampled alongside `episode` rejections
 (`affect_samples`).
 
+They reach the author under the same plain-language rule as the reason list — a **Feel**
+section, optional and unset by default, with one slider running **Still → Moving** and the
+other **Low → Bright**. The construct names appear in the code and in this document, and
+nowhere the author has to look.
+
 ## What the taste layer does with it
 
 Recorded judgments feed back into generation rather than into a dataset. Repeated Unmatch

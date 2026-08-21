@@ -27,6 +27,30 @@ replace them, or ignore them and pin the intervals by hand.
 That distinction is the whole design. Analysis produces hints; the author produces cuts.
 See [DECISIONS.md](docs/DECISIONS.md).
 
+## Directing one segment
+
+![The segment editor: author's prompt, segment mode, optional feel sliders, takes, and the time-window bundle sent to the model](docs/media/segment.png)
+
+Most of what this project believes is visible in this one panel.
+
+The large field is the author's, and it is the only thing that describes the shot. Above it,
+the machine's contribution is labelled **AI emotion (reference)** — four keywords, offered
+and ignorable. **Segment mode** is `Hold` here, meaning same scene and framing, which is what
+makes a camera lock safe to apply; `Shift` and `Motion` say otherwise. The **Feel** sliders
+are optional and stay unset unless the author wants them.
+
+The generate button reads **`Generate another take · ~4 API calls`**, because this segment is
+15.4 seconds and the unit is five: the take below it records `4×5s`, four chained clips. When
+one of them is wrong, **Partial regen** takes the numbered parts — `0 1 2 3` — and only
+those, so a bad second in the middle does not cost the three that worked.
+
+The last line is what the model actually received:
+
+> TIME WINDOW – This is part 1 of 4 of a 15.4-second sequence, covering seconds 0.0–5.0.
+> Depict ONLY the events that belong to this time window. Do not compress …
+
+The song's clock is imposed on the picture, not the other way round.
+
 ## Status
 
 **Work in progress — `0.1.0-d1`, stage D1.** Started August 2026 and under active

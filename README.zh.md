@@ -25,6 +25,28 @@ librosa 的 novelty 检测。此时什么都还没定：控件是一个叫 **App
 这个区分就是整个设计。分析给线索，切分由人来做。详见
 [DECISIONS.md](docs/DECISIONS.md)。
 
+## 调度一个区间
+
+![区间编辑器：作者的提示词、区间模式、可选的 Feel、成片，以及发给模型的时间窗](docs/media/segment.png)
+
+这个项目所相信的东西，大半都在这一屏里。
+
+那个大输入框属于作者，画面只由它来描述。上面机器的贡献被明确标为
+**AI emotion (reference)** — 四个词，只是给出来，可以不用。**Segment mode** 这里是
+`Hold`，意思是同一场景与构图，所以锁定镜头才是安全的；`Shift` 与 `Motion` 说的是相反的事。
+**Feel** 两条是可选的，作者不动就一直空着。
+
+生成按钮写着 **`Generate another take · ~4 API calls`**，因为这个区间是 15.4 秒而单位是
+5 秒：下面那条成片记录为 `4×5s`，四段相连。其中一段不对时，**Partial regen** 只重做带编号
+的部分 — `0 1 2 3` — 中间的一秒不必让另外三段跟着重来。
+
+最后一行是模型真正收到的内容。
+
+> TIME WINDOW – This is part 1 of 4 of a 15.4-second sequence, covering seconds 0.0–5.0.
+> Depict ONLY the events that belong to this time window. Do not compress …
+
+是把曲子的时钟压到画面上，不是反过来。
+
 ## 当前状态
 
 **开发中 — `0.1.0-d1`，stage D1。** 2026 年 8 月开始，仍在持续开发。它能跑，作者也在用它做
