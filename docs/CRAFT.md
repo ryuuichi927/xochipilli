@@ -4,7 +4,10 @@ Personalization and segment craft controls for Xochipilli.
 
 ---
 
-## 製品上の位置づけ（作者向けメモ）
+Why the `episode` reason exists and why it is not stamped on segments:
+[RESEARCH-CONTEXT.md](RESEARCH-CONTEXT.md).
+
+## 製品上の位置づけ
 
 **Craft は「個人用の裏パッチ」ではない。ショチピリ標準機能の一部。**
 
@@ -83,7 +86,7 @@ Craft is a **standard product feature** in the Dock window, not browser-only.
 
 ## Taste storage
 
-- Path: `data/user/taste.json` (gitignored)
+- Path: `<data>/user/taste.json`, where `<data>` defaults to `~/Documents/Xochipilli`
 - `episode_mismatch_count`, `affect_samples`, `reason_counts.episode`
 - Local-only; not uploaded with the repo
 - **Auto-apply (default on):** `taste.merge_prompt_fields` soft-merges repeated Unmatch signals into STYLE / NEGATIVE on generate & partial regen

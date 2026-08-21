@@ -12,15 +12,21 @@ Product docs ship in three languages. File order convention: **English (default 
 | Brand | [BRAND.md](BRAND.md) | [BRAND.ja.md](BRAND.ja.md) | [BRAND.zh.md](BRAND.zh.md) |
 | **Design decisions** | [DECISIONS.md](DECISIONS.md) | — | — |
 | **Positioning / differentiation** | [POSITIONING.md](POSITIONING.md) | [POSITIONING.ja.md](POSITIONING.ja.md) | — |
+| **Research context** | [RESEARCH-CONTEXT.md](RESEARCH-CONTEXT.md) | — | — |
 | **Craft / Taste (standard edit + personalization layer)** | [CRAFT.md](CRAFT.md) | same file (JA section at top) | — |
 | **Writing segment prompts** | [PROMPTING.md](PROMPTING.md) | — | — |
 | Canva export | [CANVA.md](CANVA.md) | — | — |
 
 ## What is not here
 The build diary, incident write-ups, planning notes, and the typeface shortlist are
-personal working documents. They live outside the repository in `private/`, which is
-git-ignored and mirrored to a private repo. Decisions from that log that are worth
-publishing are rewritten into [DECISIONS.md](DECISIONS.md) by hand.
+personal working documents and are not part of this repository. Decisions from that log
+that are worth publishing are rewritten into [DECISIONS.md](DECISIONS.md) by hand.
+
+## Note on RESEARCH-CONTEXT
+The author studies everyday listening. That background changed exactly one thing in the
+product — the vocabulary for rejecting a take — and this file records both that and the
+places where the framework was deliberately kept out. It is scoped to design influence; it
+is not a research write-up and the tool is not a measurement instrument.
 
 ## Note on DECISIONS
 Why the product behaves as it does, including the paths that were tried and rejected, and
